@@ -1,6 +1,9 @@
 (function () {
   const works = Array.isArray(window.HIGHLIGHT_WORKS) ? window.HIGHLIGHT_WORKS : [];
   const page = document.body.dataset.page;
+  const isLocalEditing =
+    window.location.protocol === "file:" ||
+    ["localhost", "127.0.0.1", "::1"].includes(window.location.hostname);
 
   const escapeHtml = (value) =>
     String(value ?? "")
@@ -19,10 +22,14 @@
           <a class="brand" href="index.html" aria-label="HIGH·LIGHT 首页">
             <span>HIGH</span><i aria-hidden="true"></i><span>LIGHT</span>
           </a>
-          <a class="publish-link" href="publish.html">
-            <span>发布时刻</span>
-            <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8h10M9 4l4 4-4 4"/></svg>
-          </a>
+          ${
+            isLocalEditing
+              ? `<a class="publish-link" href="publish.html">
+                  <span>发布时刻</span>
+                  <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8h10M9 4l4 4-4 4"/></svg>
+                </a>`
+              : ""
+          }
         </div>
       `;
     });

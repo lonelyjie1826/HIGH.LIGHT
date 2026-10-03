@@ -1,4 +1,13 @@
 (function () {
+  const isLocalEditing =
+    window.location.protocol === "file:" ||
+    ["localhost", "127.0.0.1", "::1"].includes(window.location.hostname);
+
+  if (!isLocalEditing) {
+    window.location.replace("index.html");
+    return;
+  }
+
   const works = Array.isArray(window.HIGHLIGHT_WORKS) ? [...window.HIGHLIGHT_WORKS] : [];
 
   const elements = {
