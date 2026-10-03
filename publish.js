@@ -107,8 +107,6 @@
       cover: `assets/covers/${coverName}`,
       video: `media/videos/${videoName}`,
       description: elements.description.value.trim(),
-      reactions: { fire: 0, laugh: 0, eyes: 0, like: 0 },
-      comments: [],
       files: {
         video: videoFile,
         cover: coverFile,
@@ -145,7 +143,7 @@ window.HIGHLIGHT_WORKS = ${JSON.stringify(list, null, 2)};
 
   function renderManageList() {
     if (!works.length) {
-      elements.manageList.innerHTML = '<p class="comments-empty">目前没有可以管理的作品。</p>';
+      elements.manageList.innerHTML = '<p class="manage-empty">目前没有可以管理的作品。</p>';
       return;
     }
 

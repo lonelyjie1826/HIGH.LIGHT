@@ -14,13 +14,6 @@ window.HIGHLIGHT_WORKS = [
     "duration": "00:12",
     "cover": "assets/covers/work-1791024923658-923658.jpeg",
     "video": "media/videos/work-1791024923658-923658.mp4",
-    "description": "",
-    "reactions": {
-      "fire": 0,
-      "laugh": 0,
-      "eyes": 0,
-      "like": 0
-    },
-    "comments": []
+    "description": ""
   }
 ];

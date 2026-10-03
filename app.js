@@ -107,10 +107,6 @@
     updateGallery();
   }
 
-  function reactionStateKey(id) {
-    return `highlight-reactions-${id}`;
-  }
-
   function initDetail() {
     renderHeader();
 
@@ -158,36 +154,6 @@
           <div><dt>片长</dt><dd>${escapeHtml(work.duration || "00:00")}</dd></div>
         </dl>
       </section>
-
-      <section class="reaction-section" aria-label="作品反应">
-        <div class="reaction-heading">
-          <p class="eyebrow">REACTIONS</p>
-          <h2>留下反应</h2>
-        </div>
-        <div class="reaction-bar" id="reactionBar"></div>
-      </section>
-
-      <section class="comments-section" aria-labelledby="commentsTitle">
-        <div class="comments-heading">
-          <div>
-            <p class="eyebrow">COMMENTS</p>
-            <h2 id="commentsTitle">评论</h2>
-          </div>
-          <span id="commentCount"></span>
-        </div>
-        <div class="comments-list" id="commentsList"></div>
-        <form class="comment-form" id="commentForm">
-          <label>
-            <span>称呼</span>
-            <input id="commentName" maxlength="18" placeholder="你的名字">
-          </label>
-          <label class="comment-content-field">
-            <span>评论</span>
-            <input id="commentText" maxlength="120" placeholder="说点什么" required>
-          </label>
-          <button class="button-primary" type="submit">发送评论</button>
-        </form>
-      </section>
     `;
 
     const player = document.querySelector("#detailPlayer");
@@ -210,101 +176,6 @@
       `;
     }
 
-    const reactions = [
-      ["fire", "🔥", "太秀了"],
-      ["laugh", "😂", "笑死"],
-      ["eyes", "👀", "离谱"],
-      ["like", "👍", "牛"]
-    ];
-    const reactionBar = document.querySelector("#reactionBar");
-    const baseReactions = work.reactions || {};
-    let localReactions = {};
-
-    try {
-      localReactions = JSON.parse(localStorage.getItem(reactionStateKey(work.id)) || "{}");
-    } catch {
-      localReactions = {};
-    }
-
-    function renderReactions() {
-      reactionBar.innerHTML = reactions
-        .map(([key, emoji, label]) => {
-          const selected = Boolean(localReactions[key]);
-          const count = Number(baseReactions[key] || 0) + (selected ? 1 : 0);
-          return `
-            <button class="reaction-button${selected ? " is-selected" : ""}" type="button" data-reaction="${key}">
-              <span>${emoji}</span>
-              <span>${label}</span>
-              <strong>${count}</strong>
-            </button>
-          `;
-        })
-        .join("");
-    }
-
-    reactionBar.addEventListener("click", (event) => {
-      const button = event.target.closest("[data-reaction]");
-      if (!button) return;
-
-      const key = button.dataset.reaction;
-      localReactions[key] = !localReactions[key];
-      localStorage.setItem(reactionStateKey(work.id), JSON.stringify(localReactions));
-      renderReactions();
-    });
-
-    renderReactions();
-
-    const commentsList = document.querySelector("#commentsList");
-    const commentCount = document.querySelector("#commentCount");
-    const commentForm = document.querySelector("#commentForm");
-    const commentName = document.querySelector("#commentName");
-    const commentText = document.querySelector("#commentText");
-    const commentsKey = `highlight-comments-${work.id}`;
-    let localComments = [];
-
-    try {
-      localComments = JSON.parse(localStorage.getItem(commentsKey) || "[]");
-    } catch {
-      localComments = [];
-    }
-
-    function renderComments() {
-      const comments = [...(work.comments || []), ...localComments];
-      commentCount.textContent = `${String(comments.length).padStart(2, "0")} 条`;
-
-      commentsList.innerHTML = comments.length
-        ? comments
-            .map(
-              (comment) => `
-                <article class="comment">
-                  <div class="comment-meta">
-                    <strong>${escapeHtml(comment.name || "匿名")}</strong>
-                    <time>${escapeHtml(comment.date || "")}</time>
-                  </div>
-                  <p>${escapeHtml(comment.text)}</p>
-                </article>
-              `
-            )
-            .join("")
-        : '<p class="comments-empty">还没有评论。</p>';
-    }
-
-    commentForm.addEventListener("submit", (event) => {
-      event.preventDefault();
-      const text = commentText.value.trim();
-      if (!text) return;
-
-      localComments.push({
-        name: commentName.value.trim() || "匿名",
-        text,
-        date: new Date().toLocaleDateString("zh-CN", { month: "2-digit", day: "2-digit" }).replace("/", ".")
-      });
-      localStorage.setItem(commentsKey, JSON.stringify(localComments));
-      commentText.value = "";
-      renderComments();
-    });
-
-    renderComments();
   }
 
   if (page === "home") initHome();
