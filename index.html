@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#0A0A0C">
+  <meta name="description" content="HIGH·LIGHT 私人游戏精彩瞬间与搞笑瞬间分享站。">
+  <title>HIGH·LIGHT — 每一帧都值得重播</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body data-page="home">
+  <div class="page-shell">
+    <header class="header-slot" data-site-header></header>
+
+    <main>
+      <section class="intro" id="featured">
+        <div class="intro-kicker">
+          <span>PERSONAL GAME ARCHIVE</span>
+          <span class="intro-index" id="archiveIndex">NO. 001—006</span>
+        </div>
+        <div class="intro-copy">
+          <h1>HIGH<span>·</span>LIGHT</h1>
+          <p>每一帧都值得重播</p>
+        </div>
+        <p class="intro-note">私人游戏瞬间档案<br>记录那些值得再看一次的回合。</p>
+      </section>
+
+      <section class="gallery-section" id="gallery" aria-labelledby="gallery-title">
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">THE COLLECTION</p>
+            <h2 id="gallery-title">瞬间画廊</h2>
+          </div>
+          <p class="result-count"><span id="resultCount">00</span> 件作品</p>
+        </div>
+
+        <div class="gallery-grid" id="galleryGrid"></div>
+        <p class="empty-state" id="emptyState">这个筛选下还没有作品。</p>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <p>HIGH·LIGHT / 私人游戏瞬间档案</p>
+      <p>© 2026</p>
+    </footer>
+  </div>
+
+  <noscript>请开启浏览器 JavaScript 后浏览本站。</noscript>
+  <script src="./data/works.js"></script>
+  <script src="./app.js"></script>
+</body>
+</html>

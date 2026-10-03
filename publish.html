@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#0A0A0C">
+  <title>发布时刻 — HIGH·LIGHT</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body data-page="publish">
+  <div class="page-shell">
+    <header class="header-slot" data-site-header></header>
+
+    <main class="publish-main">
+      <section class="publish-intro">
+        <p class="eyebrow">ADD NEW WORK</p>
+        <h1>发布一个新时刻</h1>
+        <p>选择视频和封面，填写作品信息，然后保存到网站文件夹。</p>
+      </section>
+
+      <div class="publish-layout">
+        <form class="publish-form" id="publishForm">
+          <section class="form-section">
+            <div class="form-section-head">
+              <span>01</span>
+              <h2>上传文件</h2>
+            </div>
+
+            <label class="file-field">
+              <input id="videoFile" type="file" accept="video/*">
+              <span class="file-field-label">视频文件</span>
+              <strong id="videoFileName">点击选择视频</strong>
+              <small>建议使用 MP4，文件放入 media/videos</small>
+            </label>
+
+            <label class="file-field">
+              <input id="coverFile" type="file" accept="image/*">
+              <span class="file-field-label">封面图片</span>
+              <strong id="coverFileName">点击选择封面</strong>
+              <small>建议使用 16:10 横图，文件放入 assets/covers</small>
+            </label>
+          </section>
+
+          <section class="form-section">
+            <div class="form-section-head">
+              <span>02</span>
+              <h2>作品信息</h2>
+            </div>
+
+            <label class="text-field">
+              <span>标题</span>
+              <input id="workTitle" name="title" maxlength="48" placeholder="例如：无伤终结「女武神」" required>
+            </label>
+
+            <div class="field-pair">
+              <label class="text-field">
+                <span>游戏</span>
+                <input id="workGame" name="game" maxlength="30" list="gameOptions" placeholder="输入游戏名称" required>
+                <datalist id="gameOptions"></datalist>
+              </label>
+
+              <label class="text-field">
+                <span>片长</span>
+                <input id="workDuration" name="duration" maxlength="8" placeholder="00:00">
+              </label>
+            </div>
+
+            <fieldset class="type-field">
+              <legend>时刻类型</legend>
+              <label><input type="radio" name="type" value="epic" checked><span>EPIC / 精彩</span></label>
+              <label><input type="radio" name="type" value="funny"><span>FUNNY / 搞笑</span></label>
+            </fieldset>
+
+            <label class="text-field">
+              <span>短描述</span>
+              <textarea id="workDescription" rows="3" maxlength="140" placeholder="用一句话描述这个瞬间"></textarea>
+            </label>
+          </section>
+
+          <div class="publish-actions">
+            <button class="button-primary" id="saveToFolder" type="button">保存到网站文件夹</button>
+            <button class="button-secondary" id="downloadWorks" type="button">下载更新后的作品数据</button>
+          </div>
+          <p class="form-status" id="formStatus" aria-live="polite"></p>
+          <p class="browser-note" id="browserNote"></p>
+        </form>
+
+        <aside class="publish-preview">
+          <p class="eyebrow">LIVE PREVIEW</p>
+          <article class="art-card">
+            <div class="artwork">
+              <img id="previewCover" src="./assets/covers/elden-ring.svg" alt="作品封面预览">
+              <span class="play-indicator" aria-hidden="true">
+                <svg viewBox="0 0 20 20"><path d="m7 4 8 6-8 6V4Z"/></svg>
+              </span>
+              <span class="duration" id="previewDuration">00:00</span>
+            </div>
+            <div class="label-row">
+              <div class="label-copy">
+                <span class="work-index">NEW</span>
+                <h3 id="previewTitle">作品标题</h3>
+                <p><span id="previewGame">游戏名称</span> <i>·</i> <span id="previewType">EPIC</span></p>
+              </div>
+              <span class="type-tag" id="previewTypeTag">EPIC</span>
+            </div>
+          </article>
+
+          <div class="publish-guide">
+            <h3>保存方式</h3>
+            <ol>
+              <li>用 Chrome 或 Edge 打开本站。</li>
+              <li>选择视频和封面，填好作品信息。</li>
+              <li>点击「保存到网站文件夹」，选择整个网站目录。</li>
+              <li>浏览器会复制文件并更新 data/works.js。</li>
+            </ol>
+          </div>
+        </aside>
+      </div>
+
+      <section class="manage-section" aria-labelledby="manageTitle">
+        <div class="manage-head">
+          <div>
+            <p class="eyebrow">WORK MANAGER</p>
+            <h2 id="manageTitle">作品管理</h2>
+          </div>
+          <div class="manage-head-actions">
+            <p id="manageStatus" aria-live="polite">先选择一次网站文件夹，再删除作品。</p>
+            <button class="button-secondary" id="chooseWebsiteFolder" type="button">选择网站文件夹</button>
+          </div>
+        </div>
+        <div class="manage-list" id="manageList"></div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <p>HIGH·LIGHT / 私人游戏瞬间档案</p>
+      <p>© 2026</p>
+    </footer>
+  </div>
+
+  <script src="./data/works.js"></script>
+  <script src="./app.js"></script>
+  <script src="./publish.js"></script>
+</body>
+</html>
