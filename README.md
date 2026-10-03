@@ -21,6 +21,8 @@
 
 「发布时刻」和「作品管理」只在本机运行时显示。公开网址的访客只能浏览，不能修改仓库或线上网站。
 
+本地修改完成后，双击 `发布到GitHub.bat`，确认一次即可更新公开网站。
+
 ## 发布到 GitHub Pages
 
 仓库推送到 GitHub 后，可以在仓库的 `Settings > Pages` 中选择 `Deploy from a branch`，然后将 `main` 分支作为发布来源。
