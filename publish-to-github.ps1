@@ -6,19 +6,19 @@ $env:Path = [Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [En
 $changes = git status --porcelain
 if (-not $changes) {
   Write-Host ""
-  Write-Host "没有需要发布的新内容。" -ForegroundColor Green
-  Write-Host "网站已经是最新版本。"
+  Write-Host "No new changes found." -ForegroundColor Green
+  Write-Host "The website is already up to date."
   exit 0
 }
 
 Write-Host ""
-Write-Host "即将发布以下文件：" -ForegroundColor Yellow
+Write-Host "These files will be published:" -ForegroundColor Yellow
 Write-Host $changes
 Write-Host ""
 
-$answer = Read-Host "确认发布到 GitHub？输入 Y 继续"
+$answer = Read-Host "Publish to GitHub now? Type Y to continue"
 if ($answer -notmatch "^[Yy]$") {
-  Write-Host "已取消，没有修改 GitHub。" -ForegroundColor DarkGray
+  Write-Host "Cancelled. GitHub was not changed." -ForegroundColor DarkGray
   exit 0
 }
 
@@ -28,5 +28,5 @@ git commit -m $message
 git push origin main
 
 Write-Host ""
-Write-Host "发布完成。" -ForegroundColor Green
-Write-Host "GitHub 会在 1-3 分钟内自动更新公开网站。"
+Write-Host "Publish complete." -ForegroundColor Green
+Write-Host "GitHub will update the public website in 1-3 minutes."
