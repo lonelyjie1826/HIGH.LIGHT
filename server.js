@@ -73,6 +73,46 @@ async function callCloud(payload) {
   throw lastError || new Error("CLOUD_UNREACHABLE");
 }
 
+const gatewayBase = String(cloudbaseConfig.gatewayBase || "").replace(/\/+$/, "");
+const gatewayBucket = String(cloudbaseConfig.bucketId || "high-light-media");
+
+function encodeObjectName(objectName) {
+  return String(objectName)
+    .split("/")
+    .map((segment) => encodeURIComponent(segment))
+    .join("/");
+}
+
+/**
+ * 把云函数返回的上传地址整理成绝对 URL：
+ * - 已经是 http(s) 开头：直接用
+ * - 是 /v1/... 这样的相对路径：拼上网关域名（腾讯云返回的就是这种）
+ * - 什么都没给：按对象名自己拼（预签名 token 本来就绑在这个路径上，等价）
+ * 最后补上 ?token=xxx。
+ */
+function resolveUploadUrl(upload, fallbackObjectName) {
+  const raw = String((upload && upload.url) || "").trim();
+  const objectName = String((upload && upload.objectName) || fallbackObjectName || "").trim();
+  let url = "";
+
+  if (/^https?:\/\//i.test(raw)) {
+    url = raw;
+  } else if (raw && gatewayBase) {
+    url = `${gatewayBase}${raw.startsWith("/") ? "" : "/"}${raw}`;
+  } else if (objectName && gatewayBase) {
+    url = `${gatewayBase}/v1/storages/object/upload/sign/${gatewayBucket}/${encodeObjectName(objectName)}`;
+  }
+
+  if (!url) return "";
+
+  const token = String((upload && upload.token) || "");
+  if (token && !/[?&]token=/.test(url)) {
+    url += `${url.includes("?") ? "&" : "?"}token=${encodeURIComponent(token)}`;
+  }
+
+  return url;
+}
+
 async function handleCloudUpload(request, response) {
   try {
     const token = String(request.headers["x-upload-token"] || "");
@@ -101,23 +141,34 @@ async function handleCloudUpload(request, response) {
       return;
     }
 
-    const form = new FormData();
-    form.append("key", signed.upload.cosFileId);
-    form.append("Signature", signed.upload.authorization);
-    if (signed.upload.token) {
-      form.append("x-cos-security-token", signed.upload.token);
-    }
-    form.append("file", new Blob([fileBuffer], { type: contentType }), "video");
+    // 云函数签发的是 PG 模式 Storage API 的「预签名上传链接」：
+    //   PUT <链接>?token=xxx ，body 直接是视频二进制，不需要任何 Authorization 头。
+    // 兼容云函数的两种返回结构：字段可能在 data 里，也可能已拍平。
+    const rawUpload = signed.upload || {};
+    const upload = rawUpload.data || rawUpload;
+    const targetUrl = resolveUploadUrl(upload, cloudPath);
 
-    const uploadResponse = await fetch(signed.upload.url, {
-      method: "POST",
-      body: form
+    if (!targetUrl) {
+      sendJson(response, 200, {
+        ok: false,
+        code: "INVALID_UPLOAD_URL",
+        detail: `url=${JSON.stringify(upload.url)} objectName=${JSON.stringify(upload.objectName)} token=${upload.token ? "有" : "无"}`
+      });
+      return;
+    }
+
+    const uploadResponse = await fetch(targetUrl, {
+      method: "PUT",
+      headers: { "Content-Type": contentType },
+      body: fileBuffer
     });
 
     if (!uploadResponse.ok) {
+      const detail = await uploadResponse.text().catch(() => "");
       sendJson(response, 200, {
         ok: false,
-        code: `STORAGE_UPLOAD_FAILED_${uploadResponse.status}`
+        code: `STORAGE_UPLOAD_FAILED_${uploadResponse.status}`,
+        detail: String(detail).slice(0, 300)
       });
       return;
     }
@@ -125,7 +176,7 @@ async function handleCloudUpload(request, response) {
     sendJson(response, 200, {
       ok: true,
       videoUrl: signed.videoUrl,
-      videoFileId: signed.videoFileId
+      videoFileId: signed.videoFileId || upload.objectName || ""
     });
   } catch (error) {
     sendJson(response, 200, {

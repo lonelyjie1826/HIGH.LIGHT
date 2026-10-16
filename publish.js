@@ -185,7 +185,11 @@ window.HIGHLIGHT_WORKS = ${JSON.stringify(list, null, 2)};
         xhr.upload.onprogress = (event) => {
           if (event.lengthComputable) {
             const percent = Math.round(event.loaded / event.total * 100);
-            setCloudStatus(`正在上传到云端：${percent}%`);
+            setCloudStatus(
+              percent >= 100
+                ? "本机已接收，正在上传到云端，请勿关闭窗口…"
+                : `正在上传到云端：${percent}%`
+            );
           }
         };
         xhr.onload = () => {
@@ -200,7 +204,9 @@ window.HIGHLIGHT_WORKS = ${JSON.stringify(list, null, 2)};
       });
 
       if (!payload.ok) {
-        throw new Error(payload.code || "云端鉴权失败。");
+        throw new Error(
+          [payload.code || "云端鉴权失败。", payload.detail].filter(Boolean).join("：")
+        );
       }
 
       uploadedVideo = {

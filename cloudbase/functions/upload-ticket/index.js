@@ -1,10 +1,21 @@
-const http = require("node:http");
-const crypto = require("node:crypto");
-const cloudbase = require("@cloudbase/node-sdk");
+/**
+ * upload-ticket —— CloudBase（PostgreSQL 模式）视频上传鉴权云函数
+ *
+ * 作用：
+ *   1. 校验网页传来的上传口令（UPLOAD_TOKEN）；
+ *   2. 用只保存在云函数环境变量里的 service_role API Key，
+ *      向 CloudBase Storage API 换取一张「预签名上传链接」；
+ *   3. 把这张链接交回本机 server.js，由本机把视频直传到云存储。
+ *
+ * 为什么要这样绕：
+ *   PG 模式下云存储不再支持「客户端直传 COS」，所有读写都必须经过 Storage API。
+ *   service_role API Key 拥有环境管理员权限，绝对不能出现在网页代码或仓库里，
+ *   所以它只存在于本云函数的「环境变量」中。
+ */
 
-const app = cloudbase.init({
-  env: cloudbase.SYMBOL_CURRENT_ENV
-});
+const http = require("node:http");
+const https = require("node:https");
+const crypto = require("node:crypto");
 
 const PORT = Number(process.env.PORT || 9000);
 
@@ -13,6 +24,8 @@ const ALLOWED_ORIGINS = new Set([
   "http://localhost:4173",
   "http://127.0.0.1:4173"
 ]);
+
+/* ------------------------------- 基础工具 ------------------------------- */
 
 function setCors(req, res) {
   const origin = req.headers.origin || "";
@@ -68,6 +81,50 @@ function checkToken(token) {
   return expected.length >= 24 && safeEqual(token, expected);
 }
 
+/* ----------------------------- 云存储配置读取 ----------------------------- */
+
+function gatewayBase() {
+  // 环境 ID：优先用自己配置的 ENV_ID，否则用云函数运行时自带的 TCB_ENV
+  const envId = String(process.env.ENV_ID || process.env.TCB_ENV || "").trim();
+  if (!envId) throw new Error("MISSING_ENV_ID");
+  return `https://${envId}.api.tcloudbasegateway.com/v1/storages`;
+}
+
+function bucketId() {
+  const bucket = String(process.env.BUCKET_ID || "").trim();
+  if (!bucket) throw new Error("MISSING_BUCKET_ID");
+  return bucket;
+}
+
+function serviceRoleKey() {
+  const key = String(process.env.SERVICE_ROLE_KEY || "").trim();
+  if (!key) throw new Error("MISSING_SERVICE_ROLE_KEY");
+  return key;
+}
+
+/** 对象名逐段编码，保留 / 分隔符。 */
+function encodeObjectName(objectName) {
+  return String(objectName)
+    .split("/")
+    .map((segment) => encodeURIComponent(segment))
+    .join("/");
+}
+
+/** 接口返回的 url 可能是 /v1/... 相对路径，这里补上网关域名。 */
+function toAbsoluteUrl(url) {
+  const value = String(url || "").trim();
+  if (!value) return "";
+  if (/^https?:\/\//i.test(value)) return value;
+  const base = `https://${String(process.env.ENV_ID || process.env.TCB_ENV || "").trim()}`;
+  return value.startsWith("/") ? `${base}${value}` : `${base}/${value}`;
+}
+
+/** PG 模式下的公开播放地址。 */
+function publicUrl(objectName) {
+  return `${gatewayBase()}/object/public/${bucketId()}/${encodeObjectName(objectName)}`;
+}
+
+/** 只允许上传到 videos/ 目录下的视频文件。 */
 function normalizeCloudPath(input) {
   const cloudPath = String(input || "").trim().replace(/^\/+/, "");
   if (!/^videos\/[a-zA-Z0-9._-]+\.(mp4|webm|mov)$/.test(cloudPath)) {
@@ -76,10 +133,134 @@ function normalizeCloudPath(input) {
   return cloudPath;
 }
 
-function publicUrl(cloudPath) {
-  const base = String(process.env.PUBLIC_BASE_URL || "").replace(/\/+$/, "");
-  if (!base) throw new Error("MISSING_PUBLIC_BASE_URL");
-  return `${base}/${cloudPath}`;
+/** 删除时校验对象名（与上传使用同一套规则）。 */
+function normalizeObjectName(input) {
+  const objectName = String(input || "").trim().replace(/^\/+/, "");
+  if (!/^videos\/[a-zA-Z0-9._-]+\.(mp4|webm|mov)$/.test(objectName)) {
+    return "";
+  }
+  return objectName;
+}
+
+/**
+ * 极简 HTTPS 请求（不依赖全局 fetch，Node 12 以上都能跑）。
+ * 返回 { status, text }。
+ */
+function httpsRequest(targetUrl, options) {
+  return new Promise((resolve, reject) => {
+    const target = new URL(targetUrl);
+    const request = https.request(
+      {
+        method: options.method,
+        hostname: target.hostname,
+        path: `${target.pathname}${target.search}`,
+        headers: options.headers || {}
+      },
+      (response) => {
+        let text = "";
+        response.setEncoding("utf8");
+        response.on("data", (chunk) => {
+          text += chunk;
+        });
+        response.on("end", () => {
+          resolve({ status: response.statusCode || 0, text });
+        });
+      }
+    );
+
+    request.on("error", reject);
+
+    if (options.body) {
+      request.write(options.body);
+    }
+
+    request.end();
+  });
+}
+
+function parseJson(text) {
+  try {
+    return JSON.parse(text || "{}");
+  } catch {
+    return null;
+  }
+}
+
+/** 从错误响应里挑一个能看懂的错误码。 */
+function errorCode(data, text, fallback) {
+  if (data && (data.code || data.error)) return String(data.code || data.error);
+  const message = String(text || "").trim();
+  return message ? `${fallback}: ${message.slice(0, 120)}` : fallback;
+}
+
+/* -------------------------------- 业务逻辑 -------------------------------- */
+
+async function signUpload(cloudPath) {
+  const signUrl = `${gatewayBase()}/object/upload/sign/${bucketId()}/${encodeObjectName(cloudPath)}`;
+
+  const response = await httpsRequest(signUrl, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${serviceRoleKey()}`,
+      "x-upsert": "true"
+    }
+  });
+
+  const data = parseJson(response.text);
+
+  if (response.status < 200 || response.status >= 300) {
+    return {
+      ok: false,
+      code: errorCode(data, response.text, `SIGN_FAILED_${response.status}`),
+      detail: String(response.text).slice(0, 300)
+    };
+  }
+
+  if (!data || !data.token) {
+    return {
+      ok: false,
+      code: "SIGN_NO_TOKEN",
+      detail: String(response.text).slice(0, 300)
+    };
+  }
+
+  return {
+    ok: true,
+    upload: {
+      // fullURL 是服务端拼好的完整地址；没有时把相对路径补成绝对地址
+      url: toAbsoluteUrl(data.fullURL || data.url) || signUrl,
+      token: data.token,
+      objectName: cloudPath
+    },
+    videoUrl: publicUrl(cloudPath),
+    videoFileId: cloudPath
+  };
+}
+
+async function deleteObject(objectName) {
+  const body = JSON.stringify({ prefixes: [objectName] });
+
+  const response = await httpsRequest(`${gatewayBase()}/object/${bucketId()}`, {
+    method: "DELETE",
+    headers: {
+      Authorization: `Bearer ${serviceRoleKey()}`,
+      "Content-Type": "application/json",
+      "Content-Length": Buffer.byteLength(body)
+    },
+    body
+  });
+
+  const data = parseJson(response.text);
+
+  if (response.status < 200 || response.status >= 300) {
+    return {
+      ok: false,
+      code: errorCode(data, response.text, `DELETE_FAILED_${response.status}`),
+      detail: String(response.text).slice(0, 300)
+    };
+  }
+
+  return { ok: true };
 }
 
 async function handle(payload) {
@@ -88,29 +269,21 @@ async function handle(payload) {
   }
 
   if (payload.action === "sign-upload") {
-    const cloudPath = normalizeCloudPath(payload.cloudPath);
-    const upload = await app.getUploadMetadata({ cloudPath });
-
-    return {
-      ok: true,
-      upload,
-      videoUrl: publicUrl(cloudPath),
-      videoFileId: upload.fileId || ""
-    };
+    return await signUpload(normalizeCloudPath(payload.cloudPath));
   }
 
   if (payload.action === "delete") {
-    const fileId = String(payload.fileId || "");
-    if (!fileId.startsWith("cloud://")) {
+    const objectName = normalizeObjectName(payload.fileId);
+    if (!objectName) {
       return { ok: false, code: "INVALID_FILE_ID" };
     }
-
-    await app.deleteFile({ fileList: [fileId] });
-    return { ok: true };
+    return await deleteObject(objectName);
   }
 
   return { ok: false, code: "UNKNOWN_ACTION" };
 }
+
+/* --------------------------------- 入口 --------------------------------- */
 
 const server = http.createServer(async (req, res) => {
   if (req.method === "OPTIONS") {
@@ -121,7 +294,7 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (req.method === "GET") {
-    sendJson(req, res, 200, { ok: true, service: "upload-ticket" });
+    sendJson(req, res, 200, { ok: true, service: "upload-ticket", mode: "postgres" });
     return;
   }
 
