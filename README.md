@@ -26,6 +26,8 @@
 
 视频上传到腾讯云 CloudBase，不进入 GitHub 仓库。仓库只保存封面和作品数据。
 
+CloudBase 配置记录见 [cloudbase/README.md](cloudbase/README.md)。上传口令只保存在腾讯云云函数环境变量中，不进入本仓库。
+
 ## 发布到 GitHub Pages
 
 仓库推送到 GitHub 后，可以在仓库的 `Settings > Pages` 中选择 `Deploy from a branch`，然后将 `main` 分支作为发布来源。

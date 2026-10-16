@@ -1,4 +1,3 @@
 window.HIGHLIGHT_CLOUDBASE = {
-  envId: "wangzan-d8gpex18f673aac9d",
-  functionName: "upload-ticket"
+  endpoint: "https://wangzan-d8gpex18f673aac9d.service.tcloudbase.com/upload-ticket"
 };

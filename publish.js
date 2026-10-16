@@ -42,7 +42,6 @@
   let coverObjectUrl = "";
   let rootDirectoryHandle = null;
   let pendingDeleteId = "";
-  let cloudApp = null;
   let uploadedVideo = null;
 
   const games = [...new Map(works.map((work) => [work.gameKey, work.game])).entries()];
@@ -154,33 +153,22 @@ window.HIGHLIGHT_WORKS = ${JSON.stringify(list, null, 2)};
     elements.cloudStatus.classList.toggle("is-error", isError);
   }
 
-  async function getCloudApp() {
+  async function callCloud(payload) {
     const config = window.HIGHLIGHT_CLOUDBASE || {};
-    if (!window.cloudbase || !config.envId || !config.functionName) {
+    if (!config.endpoint) {
       throw new Error("CloudBase 尚未配置。");
     }
 
-    if (!cloudApp) {
-      cloudApp = window.cloudbase.init({ env: config.envId });
-    }
-
-    const auth = cloudApp.auth();
-    const loginState = await auth.getLoginState();
-    if (!loginState) {
-      await auth.anonymousAuthProvider().signIn();
-    }
-    return cloudApp;
-  }
-
-  async function callCloudFunction(data) {
-    const app = await getCloudApp();
-    const config = window.HIGHLIGHT_CLOUDBASE;
-    const response = await app.callFunction({
-      name: config.functionName,
-      data,
-      parse: true
+    const response = await fetch(config.endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
     });
-    return response.result || {};
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data.code || `云端请求失败：${response.status}`);
+    }
+    return data;
   }
 
   async function uploadVideoToCloud() {
@@ -190,12 +178,13 @@ window.HIGHLIGHT_WORKS = ${JSON.stringify(list, null, 2)};
       if (!file) throw new Error("请先选择视频。");
       if (!token) throw new Error("请先填写云端上传口令。");
 
-      const work = makeWork();
+      const title = elements.title.value.trim() || "work";
+      const id = `${slugify(title)}-${Date.now().toString().slice(-6)}`;
       const extension = (file.name.match(/\.[a-zA-Z0-9]+$/) || [".mp4"])[0].toLowerCase();
-      const cloudPath = `videos/${work.id}${extension}`;
+      const cloudPath = `videos/${id}${extension}`;
 
       setCloudStatus("正在获取云端上传授权…");
-      const payload = await callCloudFunction({
+      const payload = await callCloud({
         action: "sign-upload",
         token,
         cloudPath
@@ -289,7 +278,7 @@ window.HIGHLIGHT_WORKS = ${JSON.stringify(list, null, 2)};
       throw new Error("删除云端视频前，请先填写云端上传口令。");
     }
 
-    const result = await callCloudFunction({
+    const result = await callCloud({
       action: "delete",
       token,
       fileId: work.videoFileId
