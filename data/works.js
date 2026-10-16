@@ -4,21 +4,6 @@
  */
 window.HIGHLIGHT_WORKS = [
   {
-    "id": "work-1791024923658-923658",
-    "title": "测试",
-    "game": "LOL",
-    "gameKey": "game-1max",
-    "type": "epic",
-    "typeLabel": "EPIC",
-    "date": "2026.10.03",
-    "duration": "00:12",
-    "cover": "assets/covers/work-1791024923658-923658.jpeg",
-    "video": "media/videos/work-1791024923658-923658.mp4",
-    "videoFileId": "",
-    "videoStorage": "local",
-    "description": ""
-  },
-  {
     "id": "1-248847",
     "title": "1",
     "game": "LOL",
