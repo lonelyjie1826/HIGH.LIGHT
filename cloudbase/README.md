@@ -7,6 +7,7 @@
 - 类型：HTTP 云函数
 - 入口一：`https://wangzan-d8gpex18f673aac9d-1507394434.ap-shanghai.app.tcloudbase.com/upload-ticket`
 - 入口二：`https://wangzan-d8gpex18f673aac9d.service.tcloudbase.com/upload-ticket`
+- 上传代理：本机 `server.js` 的 `/api/cloud-upload`，浏览器不直接跨域调用 CloudBase
 - 代码目录：`cloudbase/functions/upload-ticket`
 
 ## 云函数环境变量

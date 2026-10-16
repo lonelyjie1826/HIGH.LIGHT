@@ -154,40 +154,12 @@ window.HIGHLIGHT_WORKS = ${JSON.stringify(list, null, 2)};
   }
 
   async function callCloud(payload) {
-    const config = window.HIGHLIGHT_CLOUDBASE || {};
-    const endpoints = Array.isArray(config.endpoints)
-      ? config.endpoints
-      : [config.endpoint].filter(Boolean);
-
-    if (!endpoints.length) {
-      throw new Error("CloudBase 尚未配置。");
-    }
-
-    let response = null;
-    let lastError = null;
-
-    for (const endpoint of endpoints) {
-      try {
-        response = await fetch(endpoint, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
-          cache: "no-store"
-        });
-        if (response.ok) break;
-      } catch (error) {
-        lastError = error;
-        response = null;
-      }
-    }
-
-    if (!response) {
-      throw new Error(`无法连接云端接口，请用 http://127.0.0.1:4173 打开本站并强制刷新。${lastError ? ` (${lastError.message})` : ""}`);
-    }
+    const response = await fetch("/api/cloud-delete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
     const data = await response.json();
-    if (!response.ok) {
-      throw new Error(data.code || `云端请求失败：${response.status}`);
-    }
     return data;
   }
 
@@ -203,28 +175,13 @@ window.HIGHLIGHT_WORKS = ${JSON.stringify(list, null, 2)};
       const extension = (file.name.match(/\.[a-zA-Z0-9]+$/) || [".mp4"])[0].toLowerCase();
       const cloudPath = `videos/${id}${extension}`;
 
-      setCloudStatus("正在获取云端上传授权…");
-      const payload = await callCloud({
-        action: "sign-upload",
-        token,
-        cloudPath
-      });
-
-      if (!payload.ok) {
-        throw new Error(payload.code || "云端鉴权失败。");
-      }
-
-      const form = new FormData();
-      form.append("key", payload.upload.cosFileId);
-      form.append("Signature", payload.upload.authorization);
-      if (payload.upload.token) {
-        form.append("x-cos-security-token", payload.upload.token);
-      }
-      form.append("file", file);
-
-      await new Promise((resolve, reject) => {
+      setCloudStatus("正在通过本机代理上传到云端…");
+      const payload = await new Promise((resolve, reject) => {
         const xhr = new XMLHttpRequest();
-        xhr.open("POST", payload.upload.url, true);
+        xhr.open("POST", "/api/cloud-upload", true);
+        xhr.setRequestHeader("Content-Type", file.type || "video/mp4");
+        xhr.setRequestHeader("X-Upload-Token", token);
+        xhr.setRequestHeader("X-Cloud-Path", cloudPath);
         xhr.upload.onprogress = (event) => {
           if (event.lengthComputable) {
             const percent = Math.round(event.loaded / event.total * 100);
@@ -232,12 +189,19 @@ window.HIGHLIGHT_WORKS = ${JSON.stringify(list, null, 2)};
           }
         };
         xhr.onload = () => {
-          if (xhr.status >= 200 && xhr.status < 300) resolve();
-          else reject(new Error("云端上传失败，请检查存储跨域配置。"));
+          try {
+            resolve(JSON.parse(xhr.responseText || "{}"));
+          } catch {
+            reject(new Error("云端返回格式错误。"));
+          }
         };
-        xhr.onerror = () => reject(new Error("云端上传网络错误。"));
-        xhr.send(form);
+        xhr.onerror = () => reject(new Error("本机上传代理连接失败，请重启“启动网站.bat”。"));
+        xhr.send(file);
       });
+
+      if (!payload.ok) {
+        throw new Error(payload.code || "云端鉴权失败。");
+      }
 
       uploadedVideo = {
         videoUrl: payload.videoUrl,
