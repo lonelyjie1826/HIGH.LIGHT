@@ -15,7 +15,7 @@
       <section class="publish-intro">
         <p class="eyebrow">ADD NEW WORK</p>
         <h1>发布一个新时刻</h1>
-        <p>选择视频和封面，填写作品信息，然后保存到网站文件夹。</p>
+        <p>选择视频和封面，上传到云端后保存作品信息。</p>
       </section>
 
       <div class="publish-layout">
@@ -30,7 +30,7 @@
               <input id="videoFile" type="file" accept="video/*">
               <span class="file-field-label">视频文件</span>
               <strong id="videoFileName">点击选择视频</strong>
-              <small>建议使用 MP4，文件放入 media/videos</small>
+              <small>建议使用压缩后的 MP4，上传到 CloudBase 云存储</small>
             </label>
 
             <label class="file-field">
@@ -39,6 +39,16 @@
               <strong id="coverFileName">点击选择封面</strong>
               <small>建议使用 16:10 横图，文件放入 assets/covers</small>
             </label>
+
+            <label class="text-field cloud-token-field">
+              <span>云端上传口令</span>
+              <input id="cloudToken" type="password" autocomplete="new-password" placeholder="输入云函数中设置的上传口令">
+            </label>
+
+            <div class="publish-actions cloud-actions">
+              <button class="button-secondary" id="uploadCloudVideo" type="button">上传视频到云端</button>
+            </div>
+            <p class="form-status" id="cloudStatus" aria-live="polite"></p>
           </section>
 
           <section class="form-section">
@@ -138,6 +148,9 @@
     </footer>
   </div>
 
+  <script src="./vendor/cloudbase.full.js"></script>
+  <script>window.cloudbase = window.cloudbase && window.cloudbase.default ? window.cloudbase.default : window.cloudbase;</script>
+  <script src="./cloudbase-config.js"></script>
   <script src="./data/works.js"></script>
   <script src="./app.js"></script>
   <script src="./publish.js"></script>

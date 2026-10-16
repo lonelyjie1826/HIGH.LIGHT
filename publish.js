@@ -25,6 +25,9 @@
     downloadWorks: document.querySelector("#downloadWorks"),
     status: document.querySelector("#formStatus"),
     browserNote: document.querySelector("#browserNote"),
+    cloudToken: document.querySelector("#cloudToken"),
+    uploadCloudVideo: document.querySelector("#uploadCloudVideo"),
+    cloudStatus: document.querySelector("#cloudStatus"),
     manageList: document.querySelector("#manageList"),
     manageStatus: document.querySelector("#manageStatus"),
     chooseWebsiteFolder: document.querySelector("#chooseWebsiteFolder"),
@@ -39,6 +42,8 @@
   let coverObjectUrl = "";
   let rootDirectoryHandle = null;
   let pendingDeleteId = "";
+  let cloudApp = null;
+  let uploadedVideo = null;
 
   const games = [...new Map(works.map((work) => [work.gameKey, work.game])).entries()];
   elements.gameOptions.innerHTML = games
@@ -90,6 +95,7 @@
 
     const videoName = safeFileName(videoFile, id);
     const coverName = safeFileName(coverFile, id);
+    const cloud = uploadedVideo;
 
     return {
       id,
@@ -105,7 +111,9 @@
       }).replaceAll("/", "."),
       duration: elements.duration.value.trim() || "00:00",
       cover: `assets/covers/${coverName}`,
-      video: `media/videos/${videoName}`,
+      video: cloud ? cloud.videoUrl : `media/videos/${videoName}`,
+      videoFileId: cloud ? cloud.videoFileId : "",
+      videoStorage: cloud ? "cloudbase" : "local",
       description: elements.description.value.trim(),
       files: {
         video: videoFile,
@@ -139,6 +147,97 @@ window.HIGHLIGHT_WORKS = ${JSON.stringify(list, null, 2)};
   function setManageStatus(message, isError = false) {
     elements.manageStatus.textContent = message;
     elements.manageStatus.classList.toggle("is-error", isError);
+  }
+
+  function setCloudStatus(message, isError = false) {
+    elements.cloudStatus.textContent = message;
+    elements.cloudStatus.classList.toggle("is-error", isError);
+  }
+
+  async function getCloudApp() {
+    const config = window.HIGHLIGHT_CLOUDBASE || {};
+    if (!window.cloudbase || !config.envId || !config.functionName) {
+      throw new Error("CloudBase 尚未配置。");
+    }
+
+    if (!cloudApp) {
+      cloudApp = window.cloudbase.init({ env: config.envId });
+    }
+
+    const auth = cloudApp.auth();
+    const loginState = await auth.getLoginState();
+    if (!loginState) {
+      await auth.anonymousAuthProvider().signIn();
+    }
+    return cloudApp;
+  }
+
+  async function callCloudFunction(data) {
+    const app = await getCloudApp();
+    const config = window.HIGHLIGHT_CLOUDBASE;
+    const response = await app.callFunction({
+      name: config.functionName,
+      data,
+      parse: true
+    });
+    return response.result || {};
+  }
+
+  async function uploadVideoToCloud() {
+    try {
+      const file = elements.videoFile.files[0];
+      const token = elements.cloudToken.value.trim();
+      if (!file) throw new Error("请先选择视频。");
+      if (!token) throw new Error("请先填写云端上传口令。");
+
+      const work = makeWork();
+      const extension = (file.name.match(/\.[a-zA-Z0-9]+$/) || [".mp4"])[0].toLowerCase();
+      const cloudPath = `videos/${work.id}${extension}`;
+
+      setCloudStatus("正在获取云端上传授权…");
+      const payload = await callCloudFunction({
+        action: "sign-upload",
+        token,
+        cloudPath
+      });
+
+      if (!payload.ok) {
+        throw new Error(payload.code || "云端鉴权失败。");
+      }
+
+      const form = new FormData();
+      form.append("key", payload.upload.cosFileId);
+      form.append("Signature", payload.upload.authorization);
+      if (payload.upload.token) {
+        form.append("x-cos-security-token", payload.upload.token);
+      }
+      form.append("file", file);
+
+      await new Promise((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open("POST", payload.upload.url, true);
+        xhr.upload.onprogress = (event) => {
+          if (event.lengthComputable) {
+            const percent = Math.round(event.loaded / event.total * 100);
+            setCloudStatus(`正在上传到云端：${percent}%`);
+          }
+        };
+        xhr.onload = () => {
+          if (xhr.status >= 200 && xhr.status < 300) resolve();
+          else reject(new Error("云端上传失败，请检查存储跨域配置。"));
+        };
+        xhr.onerror = () => reject(new Error("云端上传网络错误。"));
+        xhr.send(form);
+      });
+
+      uploadedVideo = {
+        videoUrl: payload.videoUrl,
+        videoFileId: payload.videoFileId
+      };
+      setCloudStatus("视频已上传到云端。继续点击“保存到网站文件夹”即可写入作品数据。");
+    } catch (error) {
+      setCloudStatus(error.message || "云端上传失败。", true);
+    }
   }
 
   function renderManageList() {
@@ -182,6 +281,24 @@ window.HIGHLIGHT_WORKS = ${JSON.stringify(list, null, 2)};
     }
   }
 
+  async function removeCloudVideo(work) {
+    if (work.videoStorage !== "cloudbase" || !work.videoFileId) return;
+
+    const token = elements.cloudToken.value.trim();
+    if (!token) {
+      throw new Error("删除云端视频前，请先填写云端上传口令。");
+    }
+
+    const result = await callCloudFunction({
+      action: "delete",
+      token,
+      fileId: work.videoFileId
+    });
+    if (!result.ok) {
+      throw new Error(result.code || "云端视频删除失败。");
+    }
+  }
+
   async function removeFileIfUnused(work, remainingWorks) {
     if (!rootDirectoryHandle) {
       throw new Error("请先选择网站文件夹。");
@@ -192,7 +309,9 @@ window.HIGHLIGHT_WORKS = ${JSON.stringify(list, null, 2)};
     const videoUsed = remainingWorks.some((item) => item.video === work.video);
     const coverUsed = remainingWorks.some((item) => item.cover === work.cover);
 
-    if (videoName && !videoUsed) {
+    if (work.videoStorage === "cloudbase") {
+      await removeCloudVideo(work);
+    } else if (videoName && !videoUsed) {
       const mediaHandle = await rootDirectoryHandle.getDirectoryHandle("media");
       const videoHandle = await mediaHandle.getDirectoryHandle("videos");
       await videoHandle.removeEntry(videoName).catch(() => {});
@@ -251,6 +370,8 @@ window.HIGHLIGHT_WORKS = ${JSON.stringify(list, null, 2)};
   elements.videoFile.addEventListener("change", () => {
     const file = elements.videoFile.files[0];
     elements.videoFileName.textContent = file ? file.name : "点击选择视频";
+    uploadedVideo = null;
+    setCloudStatus("");
 
     if (!file) return;
 
@@ -289,14 +410,16 @@ window.HIGHLIGHT_WORKS = ${JSON.stringify(list, null, 2)};
       const work = makeWork();
       const rootHandle = await window.showDirectoryPicker({ mode: "readwrite" });
       rootDirectoryHandle = rootHandle;
-      const mediaHandle = await rootHandle.getDirectoryHandle("media");
-      const videoHandle = await mediaHandle.getDirectoryHandle("videos");
       const assetsHandle = await rootHandle.getDirectoryHandle("assets");
       const coversHandle = await assetsHandle.getDirectoryHandle("covers");
       const dataHandle = await rootHandle.getDirectoryHandle("data");
 
-      setStatus("正在复制视频，较大的文件可能需要一点时间…");
-      await writeFile(videoHandle, work.files.videoName, work.files.video);
+      setStatus("正在保存作品信息…");
+      if (work.videoStorage !== "cloudbase") {
+        const mediaHandle = await rootHandle.getDirectoryHandle("media");
+        const videoHandle = await mediaHandle.getDirectoryHandle("videos");
+        await writeFile(videoHandle, work.files.videoName, work.files.video);
+      }
       await writeFile(coversHandle, work.files.coverName, work.files.cover);
 
       const updatedWorks = [...works, cleanWork(work)];
@@ -308,6 +431,8 @@ window.HIGHLIGHT_WORKS = ${JSON.stringify(list, null, 2)};
       elements.videoFileName.textContent = "点击选择视频";
       elements.coverFileName.textContent = "点击选择封面";
       elements.previewCover.src = "./assets/covers/elden-ring.svg";
+      uploadedVideo = null;
+      setCloudStatus("");
       updatePreview();
     } catch (error) {
       if (error?.name === "AbortError") return;
@@ -359,6 +484,7 @@ window.HIGHLIGHT_WORKS = ${JSON.stringify(list, null, 2)};
     elements.browserNote.textContent = "请使用 Chrome 或 Edge 打开发布页，即可启用自动保存。也可以下载作品数据后手动替换 data/works.js。";
   }
 
+  elements.uploadCloudVideo.addEventListener("click", uploadVideoToCloud);
   renderManageList();
   elements.downloadWorks.addEventListener("click", downloadWorks);
   updatePreview();

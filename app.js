@@ -158,9 +158,16 @@
 
     const player = document.querySelector("#detailPlayer");
     if (work.video) {
+      const videoUrl = new URL(work.video, window.location.href);
+      const preconnect = document.createElement("link");
+      preconnect.rel = "preconnect";
+      preconnect.href = videoUrl.origin;
+      preconnect.crossOrigin = "";
+      document.head.appendChild(preconnect);
+
       player.innerHTML = `
         <video controls playsinline preload="metadata" poster="${escapeHtml(work.cover)}">
-          <source src="${escapeHtml(work.video)}">
+          <source src="${escapeHtml(work.video)}" type="video/mp4">
           你的浏览器不支持视频播放。
         </video>
       `;

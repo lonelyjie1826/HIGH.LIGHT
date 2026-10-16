@@ -883,6 +883,14 @@ button {
   gap: 12px;
 }
 
+.cloud-token-field {
+  margin-top: 22px;
+}
+
+.cloud-actions {
+  margin-top: 16px;
+}
+
 .form-status,
 .browser-note {
   margin: 18px 0 0;
