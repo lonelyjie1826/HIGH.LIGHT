@@ -155,19 +155,34 @@ window.HIGHLIGHT_WORKS = ${JSON.stringify(list, null, 2)};
 
   async function callCloud(payload) {
     const config = window.HIGHLIGHT_CLOUDBASE || {};
-    if (!config.endpoint) {
+    const endpoints = Array.isArray(config.endpoints)
+      ? config.endpoints
+      : [config.endpoint].filter(Boolean);
+
+    if (!endpoints.length) {
       throw new Error("CloudBase 尚未配置。");
     }
 
-    let response;
-    try {
-      response = await fetch(config.endpoint, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload)
-      });
-    } catch {
-      throw new Error("无法连接云端接口，请用 http://127.0.0.1:4173 打开本站并强制刷新。");
+    let response = null;
+    let lastError = null;
+
+    for (const endpoint of endpoints) {
+      try {
+        response = await fetch(endpoint, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+          cache: "no-store"
+        });
+        if (response.ok) break;
+      } catch (error) {
+        lastError = error;
+        response = null;
+      }
+    }
+
+    if (!response) {
+      throw new Error(`无法连接云端接口，请用 http://127.0.0.1:4173 打开本站并强制刷新。${lastError ? ` (${lastError.message})` : ""}`);
     }
     const data = await response.json();
     if (!response.ok) {

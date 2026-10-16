@@ -5,7 +5,8 @@
 - 环境：`wangzan-d8gpex18f673aac9d`
 - 函数名：`upload-ticket`
 - 类型：HTTP 云函数
-- 入口：`https://wangzan-d8gpex18f673aac9d.service.tcloudbase.com/upload-ticket`
+- 入口一：`https://wangzan-d8gpex18f673aac9d-1507394434.ap-shanghai.app.tcloudbase.com/upload-ticket`
+- 入口二：`https://wangzan-d8gpex18f673aac9d.service.tcloudbase.com/upload-ticket`
 - 代码目录：`cloudbase/functions/upload-ticket`
 
 ## 云函数环境变量
