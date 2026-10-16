@@ -159,11 +159,16 @@ window.HIGHLIGHT_WORKS = ${JSON.stringify(list, null, 2)};
       throw new Error("CloudBase 尚未配置。");
     }
 
-    const response = await fetch(config.endpoint, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload)
-    });
+    let response;
+    try {
+      response = await fetch(config.endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+    } catch {
+      throw new Error("无法连接云端接口，请用 http://127.0.0.1:4173 打开本站并强制刷新。");
+    }
     const data = await response.json();
     if (!response.ok) {
       throw new Error(data.code || `云端请求失败：${response.status}`);
