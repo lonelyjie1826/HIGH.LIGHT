@@ -124,10 +124,17 @@ function publicUrl(objectName) {
   return `${gatewayBase()}/object/public/${bucketId()}/${encodeObjectName(objectName)}`;
 }
 
-/** 只允许上传到 videos/ 目录下的视频文件。 */
+// 只允许两类对象：videos/ 下的视频、covers/ 下的封面图
+const VIDEO_OBJECT = /^videos\/[a-zA-Z0-9._-]+\.(mp4|webm|mov)$/;
+const COVER_OBJECT = /^covers\/[a-zA-Z0-9._-]+\.(png|jpg|jpeg|webp)$/;
+
+function isAllowedObject(name) {
+  return VIDEO_OBJECT.test(name) || COVER_OBJECT.test(name);
+}
+
 function normalizeCloudPath(input) {
   const cloudPath = String(input || "").trim().replace(/^\/+/, "");
-  if (!/^videos\/[a-zA-Z0-9._-]+\.(mp4|webm|mov)$/.test(cloudPath)) {
+  if (!isAllowedObject(cloudPath)) {
     throw new Error("INVALID_CLOUD_PATH");
   }
   return cloudPath;
@@ -136,10 +143,7 @@ function normalizeCloudPath(input) {
 /** 删除时校验对象名（与上传使用同一套规则）。 */
 function normalizeObjectName(input) {
   const objectName = String(input || "").trim().replace(/^\/+/, "");
-  if (!/^videos\/[a-zA-Z0-9._-]+\.(mp4|webm|mov)$/.test(objectName)) {
-    return "";
-  }
-  return objectName;
+  return isAllowedObject(objectName) ? objectName : "";
 }
 
 /**

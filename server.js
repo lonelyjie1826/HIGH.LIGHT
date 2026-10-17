@@ -2,6 +2,7 @@ const http = require("node:http");
 const fs = require("node:fs");
 const path = require("node:path");
 const { URL } = require("node:url");
+const { execFile } = require("node:child_process");
 
 const root = __dirname;
 const port = Number(process.env.PORT || 4173);
@@ -113,6 +114,234 @@ function resolveUploadUrl(upload, fallbackObjectName) {
   return url;
 }
 
+/* ---------------------- 作品数据读写 / 自动提交推送 ---------------------- */
+
+const worksFile = path.join(root, "data", "works.js");
+const worksHeader = `/*
+ * HIGH·LIGHT 作品数据
+ * 此文件由网站发布页更新。普通使用无需手动编辑。
+ */
+window.HIGHLIGHT_WORKS = `;
+
+function readWorks() {
+  const source = fs.readFileSync(worksFile, "utf8");
+  const start = source.indexOf("[");
+  const end = source.lastIndexOf("]");
+  if (start < 0 || end <= start) throw new Error("WORKS_PARSE_FAILED");
+  const list = JSON.parse(source.slice(start, end + 1));
+  if (!Array.isArray(list)) throw new Error("WORKS_PARSE_FAILED");
+  return list;
+}
+
+function writeWorks(list) {
+  fs.writeFileSync(worksFile, `${worksHeader}${JSON.stringify(list, null, 2)};\n`, "utf8");
+}
+
+const gitCandidates = [
+  "git",
+  "C:\\Program Files\\Git\\cmd\\git.exe",
+  "C:\\Program Files (x86)\\Git\\cmd\\git.exe"
+];
+
+let gitCommand = "";
+
+/** 跑一条 git 命令，不弹出任何交互式提示（否则后台进程会闷死）。 */
+function execGit(command, args) {
+  return new Promise((resolve) => {
+    execFile(
+      command,
+      args,
+      {
+        cwd: root,
+        windowsHide: true,
+        timeout: 180000,
+        env: { ...process.env, GIT_TERMINAL_PROMPT: "0" }
+      },
+      (error, stdout, stderr) => {
+        resolve({
+          ok: !error,
+          output: `${stdout || ""}${stderr || ""}`.trim(),
+          notFound: Boolean(error && error.code === "ENOENT")
+        });
+      }
+    );
+  });
+}
+
+/** 首次调用时自动找准可用的 git：PATH 里没有就试 Windows 默认安装路径。 */
+async function runGit(args) {
+  if (!gitCommand) {
+    for (const candidate of gitCandidates) {
+      const probe = await execGit(candidate, ["--version"]);
+      if (probe.ok) {
+        gitCommand = candidate;
+        break;
+      }
+      if (!probe.notFound) break;
+    }
+
+    if (!gitCommand) {
+      return { ok: false, output: "找不到 git，请确认这台电脑装了 Git for Windows。" };
+    }
+  }
+
+  return await execGit(gitCommand, args);
+}
+
+/**
+ * 提交并推送 data/works.js（以及被删掉的本地素材）。
+ * 关键：push 之后回头比较 HEAD 和 origin/main，确认远端真的收到了，
+ * 避免出现"看着成功其实没推上去"的假成功。
+ */
+async function publishWorks(extraPaths) {
+  const paths = ["data/works.js", ...(extraPaths || [])];
+
+  const add = await runGit(["add", "-A", "--", ...paths]);
+  if (!add.ok) {
+    return { ok: false, code: "GIT_ADD_FAILED", detail: add.output };
+  }
+
+  const message = `Update works ${new Date().toISOString().slice(0, 16).replace("T", " ")}`;
+  const commit = await runGit(["commit", "-m", message]);
+  const nothingToCommit = /nothing to commit|no changes added|无文件要提交/i.test(commit.output);
+  if (!commit.ok && !nothingToCommit) {
+    return { ok: false, code: "GIT_COMMIT_FAILED", detail: commit.output };
+  }
+
+  const push = await runGit(["push", "origin", "main"]);
+  if (!push.ok) {
+    return { ok: false, code: "GIT_PUSH_FAILED", detail: push.output };
+  }
+
+  const local = await runGit(["rev-parse", "HEAD"]);
+  const remote = await runGit(["rev-parse", "origin/main"]);
+  if (!local.ok || !remote.ok || local.output !== remote.output) {
+    return { ok: false, code: "GIT_PUSH_NOT_APPLIED", detail: push.output };
+  }
+
+  return { ok: true, detail: push.output };
+}
+
+/** 本机接口很轻量地校验一下口令（真正的鉴权发生在云函数）。 */
+function hasUploadToken(request) {
+  return Boolean(String(request.headers["x-upload-token"] || "").trim());
+}
+
+function readJsonBody(request) {
+  return readBody(request, 1024 * 1024).then((buffer) => {
+    return JSON.parse(buffer.toString("utf8") || "{}");
+  });
+}
+
+async function handleSaveWork(request, response) {
+  try {
+    if (!hasUploadToken(request)) {
+      sendJson(response, 400, { ok: false, code: "MISSING_TOKEN" });
+      return;
+    }
+
+    const payload = await readJsonBody(request);
+    const work = payload.work;
+
+    if (!work || !work.id) {
+      sendJson(response, 200, { ok: false, code: "INVALID_WORK" });
+      return;
+    }
+
+    const list = readWorks();
+    if (list.some((item) => item.id === work.id)) {
+      sendJson(response, 200, { ok: false, code: "WORK_EXISTS" });
+      return;
+    }
+
+    list.push(work);
+    writeWorks(list);
+
+    const published = await publishWorks([]);
+    sendJson(response, 200, {
+      ok: true,
+      works: list,
+      pushed: published.ok,
+      publishError: published.ok ? "" : `${published.code}：${published.detail}`
+    });
+  } catch (error) {
+    sendJson(response, 200, { ok: false, code: error.message || "SAVE_WORK_FAILED" });
+  }
+}
+
+async function handleDeleteWork(request, response) {
+  try {
+    if (!hasUploadToken(request)) {
+      sendJson(response, 400, { ok: false, code: "MISSING_TOKEN" });
+      return;
+    }
+
+    const payload = await readJsonBody(request);
+    const id = String(payload.id || "");
+    const token = String(payload.token || "");
+
+    const list = readWorks();
+    const index = list.findIndex((item) => item.id === id);
+    if (index < 0) {
+      sendJson(response, 200, { ok: false, code: "WORK_NOT_FOUND" });
+      return;
+    }
+
+    const work = list[index];
+    const removedPaths = [];
+
+    // 云端对象：视频 + 封面
+    if (work.videoStorage === "cloudbase" && work.videoFileId) {
+      const result = await callCloud({ action: "delete", token, fileId: work.videoFileId });
+      if (!result.ok) {
+        sendJson(response, 200, result);
+        return;
+      }
+    }
+
+    if (work.coverStorage === "cloudbase" && work.coverFileId) {
+      const result = await callCloud({ action: "delete", token, fileId: work.coverFileId });
+      if (!result.ok) {
+        sendJson(response, 200, result);
+        return;
+      }
+    }
+
+    // 本地文件（早期作品）：封面
+    const cover = String(work.cover || "");
+    if (cover.startsWith("assets/covers/")) {
+      const coverPath = path.resolve(root, cover);
+      if (coverPath.startsWith(root)) {
+        fs.rmSync(coverPath, { force: true });
+        removedPaths.push("assets/covers");
+      }
+    }
+
+    // 本地文件（早期作品）：视频
+    const video = String(work.video || "");
+    if (work.videoStorage !== "cloudbase" && video.startsWith("media/videos/")) {
+      const videoPath = path.resolve(root, video);
+      if (videoPath.startsWith(root)) {
+        fs.rmSync(videoPath, { force: true });
+        removedPaths.push("media/videos");
+      }
+    }
+
+    list.splice(index, 1);
+    writeWorks(list);
+
+    const published = await publishWorks(removedPaths);
+    sendJson(response, 200, {
+      ok: true,
+      works: list,
+      pushed: published.ok,
+      publishError: published.ok ? "" : `${published.code}：${published.detail}`
+    });
+  } catch (error) {
+    sendJson(response, 200, { ok: false, code: error.message || "DELETE_WORK_FAILED" });
+  }
+}
+
 async function handleCloudUpload(request, response) {
   try {
     const token = String(request.headers["x-upload-token"] || "");
@@ -215,6 +444,16 @@ const server = http.createServer(async (request, response) => {
 
   if (request.method === "POST" && requestPath === "/api/cloud-delete") {
     await handleCloudDelete(request, response);
+    return;
+  }
+
+  if (request.method === "POST" && requestPath === "/api/save-work") {
+    await handleSaveWork(request, response);
+    return;
+  }
+
+  if (request.method === "POST" && requestPath === "/api/delete-work") {
+    await handleDeleteWork(request, response);
     return;
   }
 

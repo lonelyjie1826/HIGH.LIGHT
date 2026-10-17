@@ -39,7 +39,7 @@ VALUES (
   'high-light-media',
   true,
   200 * 1024 * 1024,
-  ARRAY['video/mp4', 'video/webm', 'video/quicktime']
+  ARRAY['video/mp4','video/webm','video/quicktime','image/png','image/jpeg','image/webp']
 )
 ON CONFLICT (id) DO UPDATE SET
   public = EXCLUDED.public,
@@ -62,13 +62,24 @@ CREATE POLICY objects_public_read ON storage.objects
 
 ## 上传链路
 
-1. 浏览器把视频 POST 到本机 `server.js` 的 `/api/cloud-upload`（口令放在请求头，不落盘）。
+视频和封面走同一条链路，只是对象路径不同（`videos/…` 与 `covers/…`）：
+
+1. 浏览器把文件 POST 到本机 `server.js` 的 `/api/cloud-upload`（口令放在请求头，不落盘）。
 2. `server.js` 带口令调用云函数 `upload-ticket` 的 `sign-upload`。
 3. 云函数用 `SERVICE_ROLE_KEY` 请求
    `POST /v1/storages/object/upload/sign/{bucketId}/{objectName}`，拿到预签名上传链接和 token。
-4. `server.js` 用 `PUT <链接>?token=xxx` 把视频二进制直传到云存储（不再经过云函数，避免大文件超时）。
-5. 播放地址为 `https://{envId}.api.tcloudbasegateway.com/v1/storages/object/public/{bucketId}/{objectName}`，
-   由云函数一并返回，写进 `data/works.js` 的 `video` 字段。
+4. `server.js` 用 `PUT <链接>?token=xxx` 把文件二进制直传到云存储（不经过云函数，避免大文件超时）。
+5. 公开地址为 `https://{envId}.api.tcloudbasegateway.com/v1/storages/object/public/{bucketId}/{objectName}`，
+   由云函数一并返回，写进 `data/works.js` 的 `video` / `cover` 字段。
+
+### 保存作品（B 方案：全自动）
+
+1. 视频、封面都传完后，浏览器 POST `{ work }` 到本机 `/api/save-work`。
+2. `server.js` 读取并追加 `data/works.js`。
+3. `server.js` 自动执行 `git add -A -- data/works.js` → `git commit` → `git push origin main`。
+4. push 之后还会比较 `HEAD` 和 `origin/main`，**确认远端真的收到**才算成功（避免假成功）。
+
+删除作品同理，走 `/api/delete-work`：先删云端对象，再改 `works.js`，最后自动发布。
 
 > 注意：签名接口返回的 `url` 是 `/v1/storages/...` 相对路径，不是绝对地址。
 > `server.js` 会读 `cloudbase/config.json` 里的 `gatewayBase` / `bucketId` 把它补成绝对 URL；

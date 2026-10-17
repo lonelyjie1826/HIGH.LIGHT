@@ -30,7 +30,6 @@
     cloudStatus: document.querySelector("#cloudStatus"),
     manageList: document.querySelector("#manageList"),
     manageStatus: document.querySelector("#manageStatus"),
-    chooseWebsiteFolder: document.querySelector("#chooseWebsiteFolder"),
     previewCover: document.querySelector("#previewCover"),
     previewTitle: document.querySelector("#previewTitle"),
     previewGame: document.querySelector("#previewGame"),
@@ -40,7 +39,6 @@
   };
 
   let coverObjectUrl = "";
-  let rootDirectoryHandle = null;
   let pendingDeleteId = "";
   let uploadedVideo = null;
 
@@ -49,6 +47,8 @@
     .map(([, game]) => `<option value="${game}"></option>`)
     .join("");
 
+  /* ------------------------------ 小工具 ------------------------------ */
+
   function slugify(value) {
     const slug = String(value || "")
       .toLowerCase()
@@ -56,13 +56,6 @@
       .replace(/[^a-z0-9]+/g, "-")
       .replace(/^-|-$/g, "");
     return slug || `work-${Date.now()}`;
-  }
-
-  function safeFileName(file, fallback) {
-    if (!file) return "";
-    const lastDot = file.name.lastIndexOf(".");
-    const extension = lastDot >= 0 ? file.name.slice(lastDot).toLowerCase() : "";
-    return `${fallback}${extension}`;
   }
 
   function gameKeyFor(game) {
@@ -80,62 +73,19 @@
     return elements.form.elements.type.value === "funny" ? "funny" : "epic";
   }
 
-  function makeWork() {
-    const type = getSelectedType();
-    const title = elements.title.value.trim();
-    const game = elements.game.value.trim();
-    const id = `${slugify(title)}-${Date.now().toString().slice(-6)}`;
-    const videoFile = elements.videoFile.files[0];
-    const coverFile = elements.coverFile.files[0];
-
-    if (!title || !game || !videoFile || !coverFile) {
-      throw new Error("请填写标题、游戏，并选择视频和封面。");
-    }
-
-    const videoName = safeFileName(videoFile, id);
-    const coverName = safeFileName(coverFile, id);
-    const cloud = uploadedVideo;
-
-    return {
-      id,
-      title,
-      game,
-      gameKey: gameKeyFor(game),
-      type,
-      typeLabel: type === "epic" ? "EPIC" : "FUNNY",
-      date: new Date().toLocaleDateString("zh-CN", {
-        year: "numeric",
-        month: "2-digit",
-        day: "2-digit"
-      }).replaceAll("/", "."),
-      duration: elements.duration.value.trim() || "00:00",
-      cover: `assets/covers/${coverName}`,
-      video: cloud ? cloud.videoUrl : `media/videos/${videoName}`,
-      videoFileId: cloud ? cloud.videoFileId : "",
-      videoStorage: cloud ? "cloudbase" : "local",
-      description: elements.description.value.trim(),
-      files: {
-        video: videoFile,
-        cover: coverFile,
-        videoName,
-        coverName
-      }
-    };
+  function getToken() {
+    return elements.cloudToken.value.trim();
   }
 
-  function cleanWork(work) {
-    const clean = { ...work };
-    delete clean.files;
-    return clean;
+  function extensionOf(file, fallback) {
+    const match = String((file && file.name) || "").match(/\.[a-zA-Z0-9]+$/);
+    return (match ? match[0] : fallback).toLowerCase();
   }
 
-  function worksSource(list) {
-    return `/*
- * HIGH·LIGHT 作品数据
- * 此文件由网站发布页更新。普通使用无需手动编辑。
- */
-window.HIGHLIGHT_WORKS = ${JSON.stringify(list, null, 2)};
-`;
+  function todayString() {
+    return new Date()
+      .toLocaleDateString("zh-CN", { year: "numeric", month: "2-digit", day: "2-digit" })
+      .replaceAll("/", ".");
   }
 
   function setStatus(message, isError = false) {
@@ -153,71 +103,216 @@ window.HIGHLIGHT_WORKS = ${JSON.stringify(list, null, 2)};
     elements.cloudStatus.classList.toggle("is-error", isError);
   }
 
-  async function callCloud(payload) {
-    const response = await fetch("/api/cloud-delete", {
+  function worksSource(list) {
+    return `/*
+ * HIGH·LIGHT 作品数据
+ * 此文件由网站发布页更新。普通使用无需手动编辑。
+ */
+window.HIGHLIGHT_WORKS = ${JSON.stringify(list, null, 2)};
+`;
+  }
+
+  /* --------------------------- 与云端 / 本机通信 --------------------------- */
+
+  async function callLocal(pathname, payload) {
+    const response = await fetch(pathname, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        "X-Upload-Token": getToken()
+      },
       body: JSON.stringify(payload)
     });
-    const data = await response.json();
+
+    let data = {};
+    try {
+      data = await response.json();
+    } catch {
+      throw new Error("本机服务返回格式错误。");
+    }
     return data;
   }
+
+  /** 把一个文件传到云存储，成功返回 { url, fileId }。 */
+  function uploadToCloud(file, cloudPath, onProgress) {
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open("POST", "/api/cloud-upload", true);
+      xhr.setRequestHeader("Content-Type", file.type || "application/octet-stream");
+      xhr.setRequestHeader("X-Upload-Token", getToken());
+      xhr.setRequestHeader("X-Cloud-Path", cloudPath);
+
+      xhr.upload.onprogress = (event) => {
+        if (event.lengthComputable && onProgress) {
+          onProgress(Math.round((event.loaded / event.total) * 100));
+        }
+      };
+
+      xhr.onload = () => {
+        let payload = {};
+        try {
+          payload = JSON.parse(xhr.responseText || "{}");
+        } catch {
+          reject(new Error("云端返回格式错误。"));
+          return;
+        }
+
+        if (!payload.ok) {
+          reject(
+            new Error(
+              [payload.code || "云端上传失败。", payload.detail].filter(Boolean).join("：")
+            )
+          );
+          return;
+        }
+
+        resolve({ url: payload.videoUrl, fileId: payload.videoFileId });
+      };
+
+      xhr.onerror = () => reject(new Error("本机上传代理连接失败，请重启“启动网站.bat”。"));
+      xhr.send(file);
+    });
+  }
+
+  /* ------------------------------ 上传 / 保存 ------------------------------ */
 
   async function uploadVideoToCloud() {
     try {
       const file = elements.videoFile.files[0];
-      const token = elements.cloudToken.value.trim();
       if (!file) throw new Error("请先选择视频。");
-      if (!token) throw new Error("请先填写云端上传口令。");
+      if (!getToken()) throw new Error("请先填写云端上传口令。");
 
       const title = elements.title.value.trim() || "work";
       const id = `${slugify(title)}-${Date.now().toString().slice(-6)}`;
-      const extension = (file.name.match(/\.[a-zA-Z0-9]+$/) || [".mp4"])[0].toLowerCase();
-      const cloudPath = `videos/${id}${extension}`;
+      const cloudPath = `videos/${id}${extensionOf(file, ".mp4")}`;
 
-      setCloudStatus("正在通过本机代理上传到云端…");
-      const payload = await new Promise((resolve, reject) => {
-        const xhr = new XMLHttpRequest();
-        xhr.open("POST", "/api/cloud-upload", true);
-        xhr.setRequestHeader("Content-Type", file.type || "video/mp4");
-        xhr.setRequestHeader("X-Upload-Token", token);
-        xhr.setRequestHeader("X-Cloud-Path", cloudPath);
-        xhr.upload.onprogress = (event) => {
-          if (event.lengthComputable) {
-            const percent = Math.round(event.loaded / event.total * 100);
-            setCloudStatus(
-              percent >= 100
-                ? "本机已接收，正在上传到云端，请勿关闭窗口…"
-                : `正在上传到云端：${percent}%`
-            );
-          }
-        };
-        xhr.onload = () => {
-          try {
-            resolve(JSON.parse(xhr.responseText || "{}"));
-          } catch {
-            reject(new Error("云端返回格式错误。"));
-          }
-        };
-        xhr.onerror = () => reject(new Error("本机上传代理连接失败，请重启“启动网站.bat”。"));
-        xhr.send(file);
+      setCloudStatus("正在上传视频到云端…");
+      uploadedVideo = await uploadToCloud(file, cloudPath, (percent) => {
+        setCloudStatus(
+          percent >= 100
+            ? "本机已接收，正在上传到云端，请勿关闭窗口…"
+            : `正在上传到云端：${percent}%`
+        );
       });
 
-      if (!payload.ok) {
-        throw new Error(
-          [payload.code || "云端鉴权失败。", payload.detail].filter(Boolean).join("：")
-        );
-      }
-
-      uploadedVideo = {
-        videoUrl: payload.videoUrl,
-        videoFileId: payload.videoFileId
-      };
-      setCloudStatus("视频已上传到云端。继续点击“保存到网站文件夹”即可写入作品数据。");
+      setCloudStatus("视频已上传到云端。现在可以直接点「保存并发布」。");
     } catch (error) {
       setCloudStatus(error.message || "云端上传失败。", true);
     }
   }
+
+  async function saveWork() {
+    try {
+      const title = elements.title.value.trim();
+      const game = elements.game.value.trim();
+      const videoFile = elements.videoFile.files[0];
+      const coverFile = elements.coverFile.files[0];
+
+      if (!title || !game || !videoFile || !coverFile) {
+        throw new Error("请填写标题、游戏，并选择视频和封面。");
+      }
+      if (!getToken()) {
+        throw new Error("请先填写云端上传口令。");
+      }
+
+      const id = `${slugify(title)}-${Date.now().toString().slice(-6)}`;
+      const type = getSelectedType();
+
+      let video = uploadedVideo;
+      if (!video) {
+        setStatus("正在上传视频到云端…");
+        video = await uploadToCloud(
+          videoFile,
+          `videos/${id}${extensionOf(videoFile, ".mp4")}`,
+          (percent) => {
+            setStatus(
+              percent >= 100 ? "视频已传完，正在写入云端…" : `正在上传视频：${percent}%`
+            );
+          }
+        );
+      }
+
+      setStatus("正在上传封面到云端…");
+      const cover = await uploadToCloud(
+        coverFile,
+        `covers/${id}${extensionOf(coverFile, ".png")}`
+      );
+
+      const work = {
+        id,
+        title,
+        game,
+        gameKey: gameKeyFor(game),
+        type,
+        typeLabel: type === "epic" ? "EPIC" : "FUNNY",
+        date: todayString(),
+        duration: elements.duration.value.trim() || "00:00",
+        cover: cover.url,
+        coverFileId: cover.fileId,
+        coverStorage: "cloudbase",
+        video: video.url,
+        videoFileId: video.fileId,
+        videoStorage: "cloudbase",
+        description: elements.description.value.trim()
+      };
+
+      setStatus("正在保存作品数据并推送到 GitHub…");
+      const result = await callLocal("/api/save-work", { work });
+
+      if (!result.ok) {
+        throw new Error([result.code || "保存失败。", result.detail].filter(Boolean).join("："));
+      }
+
+      works.length = 0;
+      (result.works || []).forEach((item) => works.push(item));
+      renderManageList();
+
+      if (result.pushed) {
+        setStatus("已发布。公开网址 1～3 分钟后更新，记得 Ctrl+F5 强刷。");
+      } else {
+        setStatus(`作品已存到本机，但推送到 GitHub 失败：${result.publishError}`, true);
+      }
+
+      resetForm();
+    } catch (error) {
+      setStatus(error.message || "保存失败。", true);
+    }
+  }
+
+  function resetForm() {
+    const token = getToken();
+
+    elements.form.reset();
+    elements.cloudToken.value = token;
+
+    elements.videoFileName.textContent = "点击选择视频";
+    elements.coverFileName.textContent = "点击选择封面";
+    elements.previewCover.src = "./assets/covers/elden-ring.svg";
+
+    uploadedVideo = null;
+    pendingDeleteId = "";
+    setCloudStatus("");
+    updatePreview();
+  }
+
+  function downloadWorks() {
+    try {
+      const blob = new Blob([worksSource(works)], {
+        type: "text/javascript;charset=utf-8"
+      });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = "works.js";
+      anchor.click();
+      URL.revokeObjectURL(url);
+      setStatus("已下载当前的 data/works.js（仅作备份用）。");
+    } catch (error) {
+      setStatus(error.message, true);
+    }
+  }
+
+  /* ------------------------------ 作品管理 ------------------------------ */
 
   function renderManageList() {
     if (!works.length) {
@@ -245,92 +340,46 @@ window.HIGHLIGHT_WORKS = ${JSON.stringify(list, null, 2)};
       .join("");
   }
 
-  function fileNameFromPath(filePath, folder) {
-    if (!filePath || !filePath.startsWith(`${folder}/`)) return "";
-    return filePath.slice(folder.length + 1).replaceAll("/", "");
-  }
-
-  async function chooseWebsiteFolder() {
-    try {
-      rootDirectoryHandle = await window.showDirectoryPicker({ mode: "readwrite" });
-      setManageStatus("网站文件夹已选择，现在可以删除作品。");
-    } catch (error) {
-      if (error?.name === "AbortError") return;
-      setManageStatus("无法打开网站文件夹，请使用 Chrome 或 Edge 重试。", true);
-    }
-  }
-
-  async function removeCloudVideo(work) {
-    if (work.videoStorage !== "cloudbase" || !work.videoFileId) return;
-
-    const token = elements.cloudToken.value.trim();
-    if (!token) {
-      throw new Error("删除云端视频前，请先填写云端上传口令。");
-    }
-
-    const result = await callCloud({
-      action: "delete",
-      token,
-      fileId: work.videoFileId
-    });
-    if (!result.ok) {
-      throw new Error(result.code || "云端视频删除失败。");
-    }
-  }
-
-  async function removeFileIfUnused(work, remainingWorks) {
-    if (!rootDirectoryHandle) {
-      throw new Error("请先选择网站文件夹。");
-    }
-
-    const videoName = fileNameFromPath(work.video, "media/videos");
-    const coverName = fileNameFromPath(work.cover, "assets/covers");
-    const videoUsed = remainingWorks.some((item) => item.video === work.video);
-    const coverUsed = remainingWorks.some((item) => item.cover === work.cover);
-
-    if (work.videoStorage === "cloudbase") {
-      await removeCloudVideo(work);
-    } else if (videoName && !videoUsed) {
-      const mediaHandle = await rootDirectoryHandle.getDirectoryHandle("media");
-      const videoHandle = await mediaHandle.getDirectoryHandle("videos");
-      await videoHandle.removeEntry(videoName).catch(() => {});
-    }
-
-    if (coverName && !coverUsed) {
-      const assetsHandle = await rootDirectoryHandle.getDirectoryHandle("assets");
-      const coversHandle = await assetsHandle.getDirectoryHandle("covers");
-      await coversHandle.removeEntry(coverName).catch(() => {});
-    }
-
-    const dataHandle = await rootDirectoryHandle.getDirectoryHandle("data");
-    await writeFile(dataHandle, "works.js", new Blob([worksSource(remainingWorks)], { type: "text/javascript" }));
-  }
-
   async function deleteWork(id) {
-    if (!rootDirectoryHandle) {
-      try {
-        await chooseWebsiteFolder();
-      } catch {
-        return;
-      }
-      if (!rootDirectoryHandle) return;
-    }
-
     const work = works.find((item) => item.id === id);
     if (!work) return;
-    const remainingWorks = works.filter((item) => item.id !== id);
+
+    if (!getToken()) {
+      pendingDeleteId = "";
+      renderManageList();
+      setManageStatus("删除前请先填写云端上传口令。", true);
+      return;
+    }
 
     try {
       setManageStatus(`正在删除「${work.title}」…`);
-      await removeFileIfUnused(work, remainingWorks);
-      works.splice(works.findIndex((item) => item.id === id), 1);
+      const result = await callLocal("/api/delete-work", { id, token: getToken() });
+
+      if (!result.ok) {
+        throw new Error([result.code || "删除失败。", result.detail].filter(Boolean).join("："));
+      }
+
+      works.length = 0;
+      (result.works || []).forEach((item) => works.push(item));
       pendingDeleteId = "";
       renderManageList();
-      setManageStatus(`已删除「${work.title}」。回到首页刷新即可。`);
+
+      if (result.pushed) {
+        setManageStatus(`已删除「${work.title}」并发布。`);
+      } else {
+        setManageStatus(
+          `已删除「${work.title}」，但推送到 GitHub 失败：${result.publishError}`,
+          true
+        );
+      }
     } catch (error) {
-      setManageStatus(error.message || "删除失败，请检查网站文件夹。", true);
+      pendingDeleteId = "";
+      renderManageList();
+      setManageStatus(error.message || "删除失败。", true);
     }
   }
+
+  /* ------------------------------- 预览 ------------------------------- */
 
   function updatePreview() {
     const type = getSelectedType();
@@ -342,6 +391,8 @@ window.HIGHLIGHT_WORKS = ${JSON.stringify(list, null, 2)};
     elements.previewTypeTag.textContent = typeLabel;
     elements.previewDuration.textContent = elements.duration.value.trim() || "00:00";
   }
+
+  /* ------------------------------ 事件绑定 ------------------------------ */
 
   elements.form.addEventListener("input", updatePreview);
   elements.form.addEventListener("change", updatePreview);
@@ -377,94 +428,28 @@ window.HIGHLIGHT_WORKS = ${JSON.stringify(list, null, 2)};
     elements.previewCover.src = coverObjectUrl;
   });
 
-  async function writeFile(directoryHandle, name, file) {
-    const fileHandle = await directoryHandle.getFileHandle(name, { create: true });
-    const writable = await fileHandle.createWritable();
-    await writable.write(file);
-    await writable.close();
-  }
-
-  async function saveToFolder() {
-    try {
-      const work = makeWork();
-      const rootHandle = await window.showDirectoryPicker({ mode: "readwrite" });
-      rootDirectoryHandle = rootHandle;
-      const assetsHandle = await rootHandle.getDirectoryHandle("assets");
-      const coversHandle = await assetsHandle.getDirectoryHandle("covers");
-      const dataHandle = await rootHandle.getDirectoryHandle("data");
-
-      setStatus("正在保存作品信息…");
-      if (work.videoStorage !== "cloudbase") {
-        const mediaHandle = await rootHandle.getDirectoryHandle("media");
-        const videoHandle = await mediaHandle.getDirectoryHandle("videos");
-        await writeFile(videoHandle, work.files.videoName, work.files.video);
-      }
-      await writeFile(coversHandle, work.files.coverName, work.files.cover);
-
-      const updatedWorks = [...works, cleanWork(work)];
-      await writeFile(dataHandle, "works.js", new Blob([worksSource(updatedWorks)], { type: "text/javascript" }));
-
-      works.push(cleanWork(work));
-      setStatus("保存成功。回到首页刷新，就能看到新作品。");
-      elements.form.reset();
-      elements.videoFileName.textContent = "点击选择视频";
-      elements.coverFileName.textContent = "点击选择封面";
-      elements.previewCover.src = "./assets/covers/elden-ring.svg";
-      uploadedVideo = null;
-      setCloudStatus("");
-      updatePreview();
-    } catch (error) {
-      if (error?.name === "AbortError") return;
-      setStatus(error.message || "保存失败，请改用下载数据的方式。", true);
-    }
-  }
-
-  function downloadWorks() {
-    try {
-      const work = makeWork();
-      const updatedWorks = [...works, cleanWork(work)];
-      const blob = new Blob([worksSource(updatedWorks)], { type: "text/javascript;charset=utf-8" });
-      const url = URL.createObjectURL(blob);
-      const anchor = document.createElement("a");
-      anchor.href = url;
-      anchor.download = "works.js";
-      anchor.click();
-      URL.revokeObjectURL(url);
-      setStatus("已下载 works.js。还需要把视频和封面复制到指定文件夹。");
-    } catch (error) {
-      setStatus(error.message, true);
-    }
-  }
-
-  if (typeof window.showDirectoryPicker === "function") {
-    elements.browserNote.textContent = "当前浏览器支持自动保存。选择整个网站文件夹后，视频、封面和作品数据会一次写入。";
-    elements.saveToFolder.addEventListener("click", saveToFolder);
-    elements.chooseWebsiteFolder.addEventListener("click", chooseWebsiteFolder);
-    elements.manageList.addEventListener("click", (event) => {
-      const button = event.target.closest("[data-delete-id]");
-      if (!button) return;
-
-      const id = button.dataset.deleteId;
-      if (pendingDeleteId !== id) {
-        pendingDeleteId = id;
-        renderManageList();
-        setManageStatus("再次点击「确认删除」才会真正删除。");
-        return;
-      }
-
-      deleteWork(id);
-    });
-  } else {
-    elements.saveToFolder.disabled = true;
-    elements.saveToFolder.textContent = "当前浏览器不支持自动保存";
-    elements.chooseWebsiteFolder.disabled = true;
-    elements.chooseWebsiteFolder.textContent = "当前浏览器无法删除文件";
-    setManageStatus("请使用 Chrome 或 Edge 打开本站，才能直接删除作品文件。");
-    elements.browserNote.textContent = "请使用 Chrome 或 Edge 打开发布页，即可启用自动保存。也可以下载作品数据后手动替换 data/works.js。";
-  }
-
   elements.uploadCloudVideo.addEventListener("click", uploadVideoToCloud);
-  renderManageList();
+  elements.saveToFolder.addEventListener("click", saveWork);
   elements.downloadWorks.addEventListener("click", downloadWorks);
+
+  elements.manageList.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-delete-id]");
+    if (!button) return;
+
+    const id = button.dataset.deleteId;
+    if (pendingDeleteId !== id) {
+      pendingDeleteId = id;
+      renderManageList();
+      setManageStatus("再点一次「确认删除」才会真正删除，删掉后会自动发布。");
+      return;
+    }
+
+    deleteWork(id);
+  });
+
+  elements.browserNote.textContent =
+    "点「保存并发布」后：视频和封面会上传到云存储，作品数据写入 data/works.js 并自动推送到 GitHub。不用再双击任何脚本。";
+
+  renderManageList();
   updatePreview();
 })();
