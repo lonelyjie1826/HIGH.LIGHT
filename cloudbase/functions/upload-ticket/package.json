@@ -2,7 +2,6 @@
   "name": "upload-ticket",
   "version": "1.0.0",
   "main": "index.js",
-  "dependencies": {
-    "@cloudbase/node-sdk": "^3.0.0"
-  }
+  "description": "CloudBase Web 云函数：校验上传口令并签发 PG Storage API 预签名链接。只使用 Node 内置模块，无第三方依赖。",
+  "dependencies": {}
 }
