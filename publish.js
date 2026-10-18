@@ -287,7 +287,7 @@ window.HIGHLIGHT_WORKS = ${JSON.stringify(list, null, 2)};
 
     elements.videoFileName.textContent = "点击选择视频";
     elements.coverFileName.textContent = "点击选择封面";
-    elements.previewCover.src = "./assets/covers/elden-ring.svg";
+    elements.previewCover.src = "./assets/cover-placeholder.svg";
 
     uploadedVideo = null;
     pendingDeleteId = "";

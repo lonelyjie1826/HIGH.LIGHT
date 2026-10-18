@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>分享卡片生成器 — HIGH·LIGHT</title>
+<style>
+  body {
+    margin: 0;
+    min-height: 100vh;
+    background: #0A0A0C;
+    color: #F2F2F0;
+    font-family: "Helvetica Neue", "PingFang SC", "Microsoft YaHei", sans-serif;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 28px;
+    padding: 40px 24px;
+    box-sizing: border-box;
+  }
+  h1 {
+    margin: 0;
+    font-size: 15px;
+    font-weight: 300;
+    letter-spacing: 5px;
+    color: #C8A96A;
+    text-transform: uppercase;
+  }
+  canvas {
+    display: block;
+    max-width: 100%;
+    height: auto;
+    border: 1px solid rgba(255, 255, 255, 0.10);
+  }
+  button {
+    background: transparent;
+    border: 1px solid #C8A96A;
+    color: #C8A96A;
+    padding: 14px 38px;
+    font-size: 14px;
+    letter-spacing: 3px;
+    font-family: inherit;
+    cursor: pointer;
+    transition: background 0.2s, color 0.2s;
+  }
+  button:hover { background: #C8A96A; color: #0A0A0C; }
+  p { margin: 0; font-size: 13px; line-height: 1.9; color: #8B8B8F; text-align: center; }
+  p strong { color: #F2F2F0; font-weight: 400; }
+</style>
+</head>
+<body>
+  <h1>Share Card Generator</h1>
+  <canvas id="card" width="1200" height="630"></canvas>
+  <button id="download" type="button">下载 PNG（1200×630）</button>
+  <p>
+    点按钮会自动下载 <strong>share-card.png</strong><br>
+    把它放进本页面所在的 <strong>docs</strong> 文件夹
+  </p>
+<script>
+(function () {
+  var W = 1200, H = 630;
+  var GOLD = "#C8A96A";
+  var TEXT = "#F2F2F0";
+  var MUTED = "#8B8B8F";
+  var canvas = document.getElementById("card");
+  var ctx = canvas.getContext("2d");
+
+  // 逐字绘制以获得字间距（canvas 原生无 letter-spacing）
+  function drawTracked(text, centerX, baselineY, spacing) {
+    var chars = Array.from(text);
+    var widths = chars.map(function (ch) { return ctx.measureText(ch).width; });
+    var total = widths.reduce(function (a, b) { return a + b; }, 0) + spacing * (chars.length - 1);
+    var x = centerX - total / 2;
+    for (var i = 0; i < chars.length; i++) {
+      ctx.fillText(chars[i], x, baselineY);
+      x += widths[i] + spacing;
+    }
+  }
+
+  // 底色
+  ctx.fillStyle = "#0A0A0C";
+  ctx.fillRect(0, 0, W, H);
+
+  // 内边框
+  ctx.strokeStyle = "rgba(255,255,255,0.10)";
+  ctx.lineWidth = 2;
+  ctx.strokeRect(48, 48, W - 96, H - 96);
+
+  ctx.textAlign = "left";
+  ctx.textBaseline = "alphabetic";
+
+  var SANS = '"Helvetica Neue","PingFang SC","Microsoft YaHei",sans-serif';
+  var CJK = '"PingFang SC","Microsoft YaHei","Helvetica Neue",sans-serif';
+
+  // 眉标
+  ctx.font = "300 15px " + SANS;
+  ctx.fillStyle = GOLD;
+  ctx.globalAlpha = 0.75;
+  drawTracked("PERSONAL GAME ARCHIVE", W / 2, 180, 7);
+  ctx.globalAlpha = 1;
+
+  // 主标题
+  ctx.font = "300 104px " + SANS;
+  ctx.fillStyle = GOLD;
+  drawTracked("HIGH\u00B7LIGHT", W / 2, 312, 6);
+
+  // 金色分隔线
+  ctx.strokeStyle = "rgba(200,169,106,0.35)";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(W / 2 - 56, 360);
+  ctx.lineTo(W / 2 + 56, 360);
+  ctx.stroke();
+
+  // 标语
+  ctx.font = "300 30px " + CJK;
+  ctx.fillStyle = TEXT;
+  drawTracked("每一帧都值得重播", W / 2, 424, 6);
+
+  // 底部小字
+  ctx.font = "300 16px " + CJK;
+  ctx.fillStyle = MUTED;
+  drawTracked("HIGH·LIGHT / 私人游戏瞬间档案", W / 2, 516, 3);
+
+  document.getElementById("download").addEventListener("click", function () {
+    canvas.toBlob(function (blob) {
+      var a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = "share-card.png";
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(function () { URL.revokeObjectURL(a.href); }, 1000);
+    }, "image/png");
+  });
+})();
+</script>
+</body>
+</html>
