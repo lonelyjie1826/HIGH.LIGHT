@@ -53,22 +53,46 @@ function readBody(request, maxBytes = maxUploadBytes) {
   });
 }
 
+/** Node 的 fetch 失败时只给一句 "fetch failed"，真正的原因藏在 cause 里。 */
+function describeFetchError(error, endpoint) {
+  const cause = error && error.cause;
+  const head = error && error.message ? String(error.message) : "fetch failed";
+  const bits = [];
+
+  if (cause) {
+    if (cause.code || cause.name) bits.push(String(cause.code || cause.name));
+    if (cause.message) bits.push(String(cause.message));
+  }
+
+  const detail = bits.filter(Boolean).join(" ");
+  return `${head}${detail ? ` [${detail}]` : ""} @ ${endpoint}`;
+}
+
 async function callCloud(payload) {
   let lastError = null;
 
-  for (const endpoint of cloudbaseConfig.endpoints) {
-    try {
-      const response = await fetch(endpoint, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload)
-      });
-      const data = await response.json();
-      if (response.ok) return data;
-      lastError = new Error(data.code || `HTTP ${response.status}`);
-    } catch (error) {
-      lastError = error;
+  // 网络抖动很常见：整轮失败后隔 500ms 再试一轮（两个入口各试一次）
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    let transportFailed = false;
+
+    for (const endpoint of cloudbaseConfig.endpoints) {
+      try {
+        const response = await fetch(endpoint, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+        const data = await response.json();
+        if (response.ok) return data;
+        lastError = new Error(data.code || `HTTP ${response.status}`);
+      } catch (error) {
+        transportFailed = true;
+        lastError = new Error(describeFetchError(error, endpoint));
+      }
     }
+
+    if (!transportFailed) break;
+    await new Promise((resolve) => setTimeout(resolve, 500));
   }
 
   throw lastError || new Error("CLOUD_UNREACHABLE");
@@ -85,8 +109,30 @@ function encodeObjectName(objectName) {
 }
 
 /**
+ * 云函数早期版本把 https://{envId} 当成了完整域名（漏了 .api.tcloudbasegateway.com），
+ * 这里按网关域名纠正回来，避免部署新云函数之前的空窗期。
+ */
+function normalizeGatewayUrl(value) {
+  if (!gatewayBase) return value;
+
+  try {
+    const target = new URL(value);
+    const gateway = new URL(gatewayBase);
+    const envId = gateway.hostname.split(".")[0];
+
+    if (target.hostname === envId && gateway.hostname !== envId) {
+      return `${gateway.protocol}//${gateway.hostname}${target.pathname}${target.search}`;
+    }
+  } catch {
+    return value;
+  }
+
+  return value;
+}
+
+/**
  * 把云函数返回的上传地址整理成绝对 URL：
- * - 已经是 http(s) 开头：直接用
+ * - 已经是 http(s) 开头：直接用（但要纠正被截断的网关域名）
  * - 是 /v1/... 这样的相对路径：拼上网关域名（腾讯云返回的就是这种）
  * - 什么都没给：按对象名自己拼（预签名 token 本来就绑在这个路径上，等价）
  * 最后补上 ?token=xxx。
@@ -97,7 +143,7 @@ function resolveUploadUrl(upload, fallbackObjectName) {
   let url = "";
 
   if (/^https?:\/\//i.test(raw)) {
-    url = raw;
+    url = normalizeGatewayUrl(raw);
   } else if (raw && gatewayBase) {
     url = `${gatewayBase}${raw.startsWith("/") ? "" : "/"}${raw}`;
   } else if (objectName && gatewayBase) {
@@ -231,6 +277,59 @@ function readJsonBody(request) {
   return readBody(request, 1024 * 1024).then((buffer) => {
     return JSON.parse(buffer.toString("utf8") || "{}");
   });
+}
+
+/** 自检：分别探测云函数入口和 Storage 网关，把真实错误原因暴露出来。 */
+async function handleDiag(request, response) {
+  const result = {
+    node: process.version,
+    time: new Date().toISOString(),
+    endpoints: [],
+    gateway: null
+  };
+
+  for (const endpoint of cloudbaseConfig.endpoints) {
+    const started = Date.now();
+    try {
+      const res = await fetch(endpoint, { method: "GET" });
+      const text = await res.text();
+      result.endpoints.push({
+        endpoint,
+        status: res.status,
+        ms: Date.now() - started,
+        body: String(text).slice(0, 200)
+      });
+    } catch (error) {
+      result.endpoints.push({
+        endpoint,
+        ms: Date.now() - started,
+        error: describeFetchError(error, endpoint)
+      });
+    }
+  }
+
+  if (gatewayBase) {
+    const probe = `${gatewayBase}/v1/storages/object/public/${gatewayBucket}/probe.mp4`;
+    const started = Date.now();
+    try {
+      const res = await fetch(probe, { method: "GET" });
+      const text = await res.text();
+      result.gateway = {
+        url: probe,
+        status: res.status,
+        ms: Date.now() - started,
+        body: String(text).slice(0, 200)
+      };
+    } catch (error) {
+      result.gateway = {
+        url: probe,
+        ms: Date.now() - started,
+        error: describeFetchError(error, probe)
+      };
+    }
+  }
+
+  sendJson(response, 200, result);
 }
 
 async function handleSaveWork(request, response) {
@@ -386,11 +485,21 @@ async function handleCloudUpload(request, response) {
       return;
     }
 
-    const uploadResponse = await fetch(targetUrl, {
-      method: "PUT",
-      headers: { "Content-Type": contentType },
-      body: fileBuffer
-    });
+    let uploadResponse;
+    try {
+      uploadResponse = await fetch(targetUrl, {
+        method: "PUT",
+        headers: { "Content-Type": contentType },
+        body: fileBuffer
+      });
+    } catch (error) {
+      sendJson(response, 200, {
+        ok: false,
+        code: "STORAGE_PUT_FAILED",
+        detail: describeFetchError(error, targetUrl.split("?")[0])
+      });
+      return;
+    }
 
     if (!uploadResponse.ok) {
       const detail = await uploadResponse.text().catch(() => "");
@@ -444,6 +553,11 @@ const server = http.createServer(async (request, response) => {
 
   if (request.method === "POST" && requestPath === "/api/cloud-delete") {
     await handleCloudDelete(request, response);
+    return;
+  }
+
+  if (request.method === "GET" && requestPath === "/api/diag") {
+    await handleDiag(request, response);
     return;
   }
 

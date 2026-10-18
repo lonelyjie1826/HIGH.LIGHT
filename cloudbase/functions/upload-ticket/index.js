@@ -115,7 +115,8 @@ function toAbsoluteUrl(url) {
   const value = String(url || "").trim();
   if (!value) return "";
   if (/^https?:\/\//i.test(value)) return value;
-  const base = `https://${String(process.env.ENV_ID || process.env.TCB_ENV || "").trim()}`;
+  const envId = String(process.env.ENV_ID || process.env.TCB_ENV || "").trim();
+  const base = `https://${envId}.api.tcloudbasegateway.com`;
   return value.startsWith("/") ? `${base}${value}` : `${base}/${value}`;
 }
 
