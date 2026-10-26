@@ -78,7 +78,8 @@ function safeEqual(left, right) {
 
 function checkToken(token) {
   const expected = String(process.env.UPLOAD_TOKEN || "");
-  return expected.length >= 24 && safeEqual(token, expected);
+  // 口令长度不限（旧版本要求 >= 24 位，导致改短口令后一律 401）
+  return expected.length > 0 && safeEqual(token, expected);
 }
 
 /* ----------------------------- 云存储配置读取 ----------------------------- */

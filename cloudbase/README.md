@@ -20,7 +20,7 @@
 
 | 变量 | 必填 | 说明 |
 | --- | --- | --- |
-| `UPLOAD_TOKEN` | 是 | 至少 24 位的随机口令，网页上要手输的那一个 |
+| `UPLOAD_TOKEN` | 是 | 网页上要手输的上传口令。**长度不限**，建议 8 位以上字母＋数字（旧版本函数代码曾要求 ≥24 位，会导致短口令一律 401） |
 | `SERVICE_ROLE_KEY` | 是 | 控制台「环境 → API Key 管理」里 `api_key` 类型的密钥，拥有环境管理员权限 |
 | `BUCKET_ID` | 是 | 云存储桶 ID，例如 `high-light-media` |
 | `ENV_ID` | 是 | 环境 ID（`wangzan-d8gpex18f673aac9d`）。实测该 Web 函数运行时**不带** `TCB_ENV`，必须显式配置，否则报 `MISSING_ENV_ID` |
@@ -57,6 +57,8 @@ CREATE POLICY objects_public_read ON storage.objects
     )
   );
 ```
+
+> ⚠️ `file_size_limit` 设成 200MB 只是桶级配置。**云存储服务端另有 100MB（104857600 字节）硬上限**，超过就返回 `STORAGE_FILE_SIZE_LIMIT_EXCEEDED`，与桶设置无关、不可调。所以单条视频实际不能超过 100MB。
 
 不要为 `anon` 开放 `INSERT` / `UPDATE` / `DELETE` —— 否则任何人不用口令就能往桶里塞文件。
 
