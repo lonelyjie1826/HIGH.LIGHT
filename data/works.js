@@ -36,5 +36,22 @@ window.HIGHLIGHT_WORKS = [
     "videoFileId": "videos/work-578767.mp4",
     "videoStorage": "cloudbase",
     "description": ""
+  },
+  {
+    "id": "work-1794916216284-216284",
+    "title": "大法师寒冰",
+    "game": "LOL",
+    "gameKey": "game-1max",
+    "type": "epic",
+    "typeLabel": "EPIC",
+    "date": "2026.11.17",
+    "duration": "00:33",
+    "cover": "https://wangzan-d8gpex18f673aac9d.api.tcloudbasegateway.com/v1/storages/object/public/high-light-media/covers/work-1794916216284-216284.png",
+    "coverFileId": "covers/work-1794916216284-216284.png",
+    "coverStorage": "cloudbase",
+    "video": "https://wangzan-d8gpex18f673aac9d.api.tcloudbasegateway.com/v1/storages/object/public/high-light-media/videos/work-173592.mp4",
+    "videoFileId": "videos/work-173592.mp4",
+    "videoStorage": "cloudbase",
+    "description": "大法师寒冰无限ER互刷"
   }
 ];
