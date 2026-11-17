@@ -114,6 +114,16 @@ window.HIGHLIGHT_WORKS = ${JSON.stringify(list, null, 2)};
 
   /* --------------------------- 与云端 / 本机通信 --------------------------- */
 
+  // 云存储单条对象硬上限 100MB（104857600 字节）；先在前端拦掉，省得白传一遍
+  const MAX_VIDEO_BYTES = 100 * 1024 * 1024;
+
+  function assertVideoSize(file) {
+    if (file && file.size > MAX_VIDEO_BYTES) {
+      const mb = (file.size / 1024 / 1024).toFixed(0);
+      throw new Error(`视频 ${mb}MB 超过 100MB 上限，请先压缩到 720p（约 20~30MB）再上传。`);
+    }
+  }
+
   async function callLocal(pathname, payload) {
     const response = await fetch(pathname, {
       method: "POST",
@@ -169,7 +179,12 @@ window.HIGHLIGHT_WORKS = ${JSON.stringify(list, null, 2)};
         resolve({ url: payload.videoUrl, fileId: payload.videoFileId });
       };
 
-      xhr.onerror = () => reject(new Error("本机上传代理连接失败，请重启“启动网站.bat”。"));
+      xhr.onerror = () =>
+        reject(
+          new Error(
+            "本机上传代理连接中断。请确认黑色窗口里的服务还在运行；若视频超过 100MB，先压缩再试。"
+          )
+        );
       xhr.send(file);
     });
   }
@@ -181,6 +196,7 @@ window.HIGHLIGHT_WORKS = ${JSON.stringify(list, null, 2)};
       const file = elements.videoFile.files[0];
       if (!file) throw new Error("请先选择视频。");
       if (!getToken()) throw new Error("请先填写云端上传口令。");
+      assertVideoSize(file);
 
       const title = elements.title.value.trim() || "work";
       const id = `${slugify(title)}-${Date.now().toString().slice(-6)}`;
@@ -214,6 +230,7 @@ window.HIGHLIGHT_WORKS = ${JSON.stringify(list, null, 2)};
       if (!getToken()) {
         throw new Error("请先填写云端上传口令。");
       }
+      assertVideoSize(videoFile);
 
       const id = `${slugify(title)}-${Date.now().toString().slice(-6)}`;
       const type = getSelectedType();

@@ -7,7 +7,8 @@ const { execFile } = require("node:child_process");
 const root = __dirname;
 const port = Number(process.env.PORT || 4173);
 const cloudbaseConfig = require("./cloudbase/config.json");
-const maxUploadBytes = 150 * 1024 * 1024;
+// 云存储单条对象硬上限 100MB；本地中转留一点余量，超了直接给出明确提示
+const maxUploadBytes = 105 * 1024 * 1024;
 
 const types = {
   ".html": "text/html; charset=utf-8",
@@ -38,11 +39,16 @@ function readBody(request, maxBytes = maxUploadBytes) {
     const chunks = [];
     let size = 0;
 
+    let tooLarge = false;
+
     request.on("data", (chunk) => {
+      if (tooLarge) return;
       size += chunk.length;
       if (size > maxBytes) {
-        request.destroy();
-        reject(new Error("FILE_TOO_LARGE"));
+        // 不要 destroy 连接，否则浏览器只能拿到「连接中断」，看不到真正原因
+        tooLarge = true;
+        chunks.length = 0;
+        reject(new Error(`FILE_TOO_LARGE:${(maxBytes / 1024 / 1024).toFixed(0)}`));
         return;
       }
       chunks.push(chunk);
@@ -254,7 +260,16 @@ async function publishWorks(extraPaths) {
     return { ok: false, code: "GIT_COMMIT_FAILED", detail: commit.output };
   }
 
-  const push = await runGit(["push", "origin", "main"]);
+  // 国内连 GitHub 常有瞬时抖动（Connection was reset / timed out），自动重试 3 次
+  let push = { ok: false, output: "" };
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    push = await runGit(["push", "origin", "main"]);
+    if (push.ok) break;
+    if (attempt < 3) {
+      console.log(`[git] push 第 ${attempt} 次失败，${attempt * 3} 秒后重试…`);
+      await new Promise((resolve) => setTimeout(resolve, attempt * 3000));
+    }
+  }
   if (!push.ok) {
     return { ok: false, code: "GIT_PUSH_FAILED", detail: push.output };
   }
@@ -517,9 +532,15 @@ async function handleCloudUpload(request, response) {
       videoFileId: signed.videoFileId || upload.objectName || ""
     });
   } catch (error) {
-    sendJson(response, 200, {
+    const message = error.message || "CLOUD_UPLOAD_FAILED";
+    const tooLarge = message.startsWith("FILE_TOO_LARGE");
+
+    sendJson(response, tooLarge ? 413 : 200, {
       ok: false,
-      code: error.message || "CLOUD_UPLOAD_FAILED"
+      code: tooLarge ? "VIDEO_TOO_LARGE" : message,
+      ...(tooLarge
+        ? { detail: "视频超过 100MB 云存储上限，请压缩到 720p（约 20~30MB）后重试。" }
+        : {})
     });
   }
 }
@@ -545,6 +566,18 @@ async function handleCloudDelete(request, response) {
 const server = http.createServer(async (request, response) => {
   const parsedUrl = new URL(request.url || "/", `http://127.0.0.1:${port}`);
   const requestPath = decodeURIComponent(parsedUrl.pathname);
+
+  // 每个 API 请求打印一行：出问题时看这个黑色窗口，就知道请求到没到、多大、用了多久
+  if (requestPath.startsWith("/api/")) {
+    const startedAt = Date.now();
+    const contentLength = Number(request.headers["content-length"] || 0);
+    response.on("finish", () => {
+      const sizeText = contentLength ? ` ${(contentLength / 1024 / 1024).toFixed(1)}MB` : "";
+      console.log(
+        `[${new Date().toLocaleTimeString()}] ${request.method} ${requestPath}${sizeText} -> ${response.statusCode} (${Date.now() - startedAt}ms)`
+      );
+    });
+  }
 
   if (request.method === "POST" && requestPath === "/api/cloud-upload") {
     await handleCloudUpload(request, response);
